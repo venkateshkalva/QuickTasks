@@ -1,3 +1,35 @@
+
+
+
+
+// ── Diagnostics ────────────────────────────────────────────────
+                var contentType = response.Content.Headers.ContentType?.MediaType ?? "unknown";
+                var firstHex    = BitConverter.ToString(rawBytes.Take(12).ToArray());
+                // firstText is for logging only — always truncated; ResolvePdfBytes uses full bytes
+                var firstText   = System.Text.Encoding.UTF8.GetString(rawBytes.Take(300).ToArray());
+                _logger.LogInformation(
+                    "ID {Id} | ContentType: {CT} | Length: {Len} | FirstHex: {Hex} | FirstText: {Text}",
+                    id, contentType, rawBytes.Length, firstHex, firstText);
+
+                // ── Resolve raw bytes to a valid PDF ───────────────────────────
+                byte[]? finalBytes = ResolvePdfBytes(id, rawBytes, firstText);
+
+                if (finalBytes == null || !IsPdfHeader(finalBytes))
+                {
+                    _logger.LogError(
+                        "ID {Id}: could not resolve a valid PDF. CT={CT} Len={Len} FirstText={Text}",
+                        id, contentType, rawBytes.Length, firstText);
+
+                    // Dump the raw response so you can inspect it manually
+                    var dumpPath = Path.Combine(outputFolder, $"{id}_raw_response.txt");
+                    await File.WriteAllBytesAsync(dumpPath, rawBytes);
+                    _logger.LogWarning("Raw response saved to {Path} for manual inspection", dumpPath);
+
+                    failedIds.Add(id);
+                    continue;
+                }
+------------------------------------------------
+
 public class UnixToDateStringConverter : JsonConverter<string>
 {
     public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

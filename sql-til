@@ -1,0 +1,9 @@
+CREATE TABLE [dbo].[BounceRecords] (
+    Id          INT IDENTITY PRIMARY KEY,
+    Status      NVARCHAR(100),
+    Reason      NVARCHAR(500),
+    Email       NVARCHAR(256),
+    BounceType  NVARCHAR(100),
+    CreatedDate NVARCHAR(50),
+    InsertedAt  DATETIME2 DEFAULT SYSUTCDATETIME()
+)

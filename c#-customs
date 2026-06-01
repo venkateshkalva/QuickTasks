@@ -1,3 +1,124 @@
+private byte[]? ResolvePdfBytes(int id, byte[] rawBytes, string firstText)
+    {
+        // 1. Raw binary %PDF header (25 50 44 46)
+        if (IsPdfHeader(rawBytes))
+        {
+            _logger.LogInformation("ID {Id}: raw PDF binary ✓", id);
+            return rawBytes;
+        }
+
+        // 2. Quoted Base64 string — API wraps the Base64 in JSON quotes: "JVBER..."
+        //    byte[0]=34 (double-quote "), so we must decode the FULL byte array as UTF-8
+        //    and strip surrounding quotes before Base64-decoding.
+        //    DO NOT use firstText here — it is truncated to 300 chars for logging only.
+        var fullText = System.Text.Encoding.UTF8.GetString(rawBytes).Trim().Trim('"\'\0');
+        if (IsLikelyBase64(fullText))
+        {
+            try
+            {
+                var decoded = Convert.FromBase64String(fullText);
+                if (IsPdfHeader(decoded))
+                {
+                    _logger.LogInformation("ID {Id}: quoted Base64 string decoded ✓ ({Len} bytes)", id, decoded.Length);
+                    return decoded;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("ID {Id}: Base64 decode failed — {Msg}", id, ex.Message);
+            }
+        }
+
+        // 3. JSON number array  e.g.  [37,80,68,70,45,49,...]
+        //    This is what .NET APIs return when the action returns byte[]
+        if (trimmed.StartsWith('['))
+        {
+            try
+            {
+                var arr = System.Text.Json.JsonSerializer.Deserialize<byte[]>(rawBytes);
+                if (arr != null && IsPdfHeader(arr))
+                {
+                    _logger.LogInformation("ID {Id}: JSON number-array decoded ✓", id);
+                    return arr;
+                }
+            }
+            catch { /* not a number array */ }
+        }
+
+        // 4. JSON object wrapping the content — { "data": "JVBER..." } etc.
+        if (trimmed.StartsWith('{'))
+        {
+            try
+            {
+                using var doc  = System.Text.Json.JsonDocument.Parse(rawBytes);
+                var root       = doc.RootElement;
+                string[] props = { "data", "fileContent", "content", "bytes", "file", "pdf", "result", "value" };
+
+                foreach (var prop in props)
+                {
+                    if (!root.TryGetProperty(prop, out var elem)) continue;
+
+                    // String property → try Base64
+                    if (elem.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var b64 = elem.GetString()?.Trim();
+                        if (!string.IsNullOrEmpty(b64) && IsLikelyBase64(b64))
+                        {
+                            try
+                            {
+                                var decoded = Convert.FromBase64String(b64);
+                                if (IsPdfHeader(decoded))
+                                {
+                                    _logger.LogInformation("ID {Id}: JSON['{Prop}'] Base64 decoded ✓", id, prop);
+                                    return decoded;
+                                }
+                            }
+                            catch { /* not valid Base64 */ }
+                        }
+                    }
+
+                    // Array property → try number array
+                    if (elem.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        try
+                        {
+                            var arr = System.Text.Json.JsonSerializer.Deserialize<byte[]>(elem.GetRawText());
+                            if (arr != null && IsPdfHeader(arr))
+                            {
+                                _logger.LogInformation("ID {Id}: JSON['{Prop}'] byte-array decoded ✓", id, prop);
+                                return arr;
+                            }
+                        }
+                        catch { /* not a number array */ }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "ID {Id}: JSON object parse failed", id);
+            }
+        }
+
+        return null; // unrecognised format
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    /// <summary>Valid PDF files always start with the ASCII bytes for "%PDF"</summary>
+    private static bool IsPdfHeader(byte[] bytes) =>
+        bytes.Length >= 4 &&
+        bytes[0] == 0x25 &&  // %
+        bytes[1] == 0x50 &&  // P
+        bytes[2] == 0x44 &&  // D
+        bytes[3] == 0x46;    // F
+
+    /// <summary>
+    /// Quick heuristic: Base64 strings use only A-Z a-z 0-9 + / =
+    /// and "JVBER" is the Base64 encoding of "%PDF".
+    /// </summary>
+    private static bool IsLikelyBase64(string s) =>
+        s.Length > 20 &&
+        System.Text.RegularExpressions.Regex.IsMatch(s, @"^[A-Za-z0-9+/=\r\n]+$");
 
 
 

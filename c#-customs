@@ -1,0 +1,28 @@
+public class UnixToDateStringConverter : JsonConverter<string>
+{
+    public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        // Handle both number and string formats
+        if (reader.TokenType == JsonTokenType.Number)
+        {
+            var unixSeconds = reader.GetInt64();
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds)
+                                 .ToString("MM-dd-yyyy");
+        }
+        return reader.GetString() ?? "";
+    }
+
+    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options)
+        => writer.WriteStringValue(value);
+}
+
+public class BounceRecord
+{
+    public string Status { get; set; }
+    public string Reason { get; set; }
+    public string Email { get; set; }
+    public string BounceType { get; set; }
+
+    [JsonConverter(typeof(UnixToDateStringConverter))]
+    public string CreatedDate { get; set; }  // now auto-converted on deserialization
+}

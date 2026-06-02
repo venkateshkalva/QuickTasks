@@ -1,54 +1,72 @@
+using System.Net.Http.Headers;
+using System.Text.Json;
+using System.Web;
+using WeedKillerSendGridAPI.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
+namespace WeedKillerSendGridAPI.Services;
 
-public async Task<List<BounceRecord>> FetchBounceRecordsAsync(CancellationToken ct = default)
+public interface IBounceApiService
+{
+    Task<List<BounceRecord>> FetchPageAsync(int offset, CancellationToken ct = default);
+}
+
+public class BounceApiService : IBounceApiService
+{
+    private readonly HttpClient _httpClient;
+    private readonly AppSettings _settings;
+    private readonly ILogger<BounceApiService> _logger;
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        var allRecords = new List<BounceRecord>();
-        int offset = 0;
-        int page = 1;
+        PropertyNameCaseInsensitive = true
+    };
 
-        _logger.LogInformation("Starting paginated fetch — limit: {Limit}, start_date: {Start}, end_date: {End}",
-            _settings.PageLimit, _settings.StartDate, _settings.EndDate);
+    public BounceApiService(
+        HttpClient httpClient,
+        IOptions<AppSettings> settings,
+        ILogger<BounceApiService> logger)
+    {
+        _httpClient = httpClient;
+        _settings = settings.Value;
+        _logger = logger;
 
-        while (true)
+        _httpClient.BaseAddress = new Uri(_settings.ApiEndpoint);
+
+        if (!string.IsNullOrWhiteSpace(_settings.BearerToken))
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _settings.BearerToken);
+
+        if (!string.IsNullOrWhiteSpace(_settings.ApiKey))
+            _httpClient.DefaultRequestHeaders.Add("X-API-Key", _settings.ApiKey);
+    }
+
+    /// <summary>
+    /// Fetches a single page of bounce records for the given offset.
+    /// </summary>
+    public async Task<List<BounceRecord>> FetchPageAsync(int offset, CancellationToken ct = default)
+    {
+        var url = BuildUrl(offset);
+        _logger.LogInformation("GET {Url}", url);
+
+        var response = await _httpClient.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync(ct);
+        _logger.LogDebug("Raw response (offset={Offset}): {Json}", offset, json);
+
+        var records = Deserialize(json);
+
+        // Manually set BounceType on records where it is missing
+        foreach (var record in records.Where(r => string.IsNullOrWhiteSpace(r.BounceType)))
         {
-            var url = BuildUrl(offset);
-            _logger.LogInformation("Page {Page} — GET {Url}", page, url);
-
-            var response = await _httpClient.GetAsync(url, ct);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogDebug("Page {Page} raw response: {Json}", page, json);
-
-            var records = TryDeserializeAsArray(json) ?? [];
-
-            // Apply manual BounceType override for records missing it
-            foreach (var record in records.Where(r => string.IsNullOrWhiteSpace(r.BounceType)))
-            {
-                record.BounceType = _settings.DefaultBounceType;
-                _logger.LogDebug("BounceType missing for {Email} — defaulted to '{Default}'.",
-                    record.Email, _settings.DefaultBounceType);
-            }
-
-            allRecords.AddRange(records);
-
-            _logger.LogInformation("Page {Page} returned {Count} record(s). Total so far: {Total}.",
-                page, records.Count, allRecords.Count);
-
-            // Stop when the page returns fewer records than the limit — no more pages left
-            if (records.Count < _settings.PageLimit)
-            {
-                _logger.LogInformation("Last page reached (received {Count} < limit {Limit}). Stopping.",
-                    records.Count, _settings.PageLimit);
-                break;
-            }
-
-            offset += _settings.PageLimit;
-            page++;
+            record.BounceType = _settings.DefaultBounceType;
+            _logger.LogDebug("BounceType missing for {Email} — defaulted to '{Default}'.",
+                record.Email, _settings.DefaultBounceType);
         }
 
-        _logger.LogInformation("Pagination complete. Total records fetched: {Total}.", allRecords.Count);
-        return allRecords;
+        return records;
     }
 
     private string BuildUrl(int offset)
@@ -67,185 +85,322 @@ public async Task<List<BounceRecord>> FetchBounceRecordsAsync(CancellationToken 
         return $"?{query}";
     }
 
--------------------------------------------------------------
-private byte[]? ResolvePdfBytes(int id, byte[] rawBytes, string firstText)
+    private static List<BounceRecord> Deserialize(string json)
     {
-        // 1. Raw binary %PDF header (25 50 44 46)
-        if (IsPdfHeader(rawBytes))
+        try
         {
-            _logger.LogInformation("ID {Id}: raw PDF binary ✓", id);
-            return rawBytes;
+            return JsonSerializer.Deserialize<List<BounceRecord>>(json, JsonOptions) ?? [];
         }
-
-        // 2. Quoted Base64 string — API wraps the Base64 in JSON quotes: "JVBER..."
-        //    byte[0]=34 (double-quote "), so we must decode the FULL byte array as UTF-8
-        //    and strip surrounding quotes before Base64-decoding.
-        //    DO NOT use firstText here — it is truncated to 300 chars for logging only.
-        var fullText = System.Text.Encoding.UTF8.GetString(rawBytes).Trim().Trim('"\'\0');
-        if (IsLikelyBase64(fullText))
-        {
-            try
-            {
-                var decoded = Convert.FromBase64String(fullText);
-                if (IsPdfHeader(decoded))
-                {
-                    _logger.LogInformation("ID {Id}: quoted Base64 string decoded ✓ ({Len} bytes)", id, decoded.Length);
-                    return decoded;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning("ID {Id}: Base64 decode failed — {Msg}", id, ex.Message);
-            }
-        }
-
-        // 3. JSON number array  e.g.  [37,80,68,70,45,49,...]
-        //    This is what .NET APIs return when the action returns byte[]
-        if (trimmed.StartsWith('['))
-        {
-            try
-            {
-                var arr = System.Text.Json.JsonSerializer.Deserialize<byte[]>(rawBytes);
-                if (arr != null && IsPdfHeader(arr))
-                {
-                    _logger.LogInformation("ID {Id}: JSON number-array decoded ✓", id);
-                    return arr;
-                }
-            }
-            catch { /* not a number array */ }
-        }
-
-        // 4. JSON object wrapping the content — { "data": "JVBER..." } etc.
-        if (trimmed.StartsWith('{'))
-        {
-            try
-            {
-                using var doc  = System.Text.Json.JsonDocument.Parse(rawBytes);
-                var root       = doc.RootElement;
-                string[] props = { "data", "fileContent", "content", "bytes", "file", "pdf", "result", "value" };
-
-                foreach (var prop in props)
-                {
-                    if (!root.TryGetProperty(prop, out var elem)) continue;
-
-                    // String property → try Base64
-                    if (elem.ValueKind == System.Text.Json.JsonValueKind.String)
-                    {
-                        var b64 = elem.GetString()?.Trim();
-                        if (!string.IsNullOrEmpty(b64) && IsLikelyBase64(b64))
-                        {
-                            try
-                            {
-                                var decoded = Convert.FromBase64String(b64);
-                                if (IsPdfHeader(decoded))
-                                {
-                                    _logger.LogInformation("ID {Id}: JSON['{Prop}'] Base64 decoded ✓", id, prop);
-                                    return decoded;
-                                }
-                            }
-                            catch { /* not valid Base64 */ }
-                        }
-                    }
-
-                    // Array property → try number array
-                    if (elem.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    {
-                        try
-                        {
-                            var arr = System.Text.Json.JsonSerializer.Deserialize<byte[]>(elem.GetRawText());
-                            if (arr != null && IsPdfHeader(arr))
-                            {
-                                _logger.LogInformation("ID {Id}: JSON['{Prop}'] byte-array decoded ✓", id, prop);
-                                return arr;
-                            }
-                        }
-                        catch { /* not a number array */ }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "ID {Id}: JSON object parse failed", id);
-            }
-        }
-
-        return null; // unrecognised format
+        catch { return []; }
     }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    /// <summary>Valid PDF files always start with the ASCII bytes for "%PDF"</summary>
-    private static bool IsPdfHeader(byte[] bytes) =>
-        bytes.Length >= 4 &&
-        bytes[0] == 0x25 &&  // %
-        bytes[1] == 0x50 &&  // P
-        bytes[2] == 0x44 &&  // D
-        bytes[3] == 0x46;    // F
-
-    /// <summary>
-    /// Quick heuristic: Base64 strings use only A-Z a-z 0-9 + / =
-    /// and "JVBER" is the Base64 encoding of "%PDF".
-    /// </summary>
-    private static bool IsLikelyBase64(string s) =>
-        s.Length > 20 &&
-        System.Text.RegularExpressions.Regex.IsMatch(s, @"^[A-Za-z0-9+/=\r\n]+$");
-
-
-
-
-// ── Diagnostics ────────────────────────────────────────────────
-                var contentType = response.Content.Headers.ContentType?.MediaType ?? "unknown";
-                var firstHex    = BitConverter.ToString(rawBytes.Take(12).ToArray());
-                // firstText is for logging only — always truncated; ResolvePdfBytes uses full bytes
-                var firstText   = System.Text.Encoding.UTF8.GetString(rawBytes.Take(300).ToArray());
-                _logger.LogInformation(
-                    "ID {Id} | ContentType: {CT} | Length: {Len} | FirstHex: {Hex} | FirstText: {Text}",
-                    id, contentType, rawBytes.Length, firstHex, firstText);
-
-                // ── Resolve raw bytes to a valid PDF ───────────────────────────
-                byte[]? finalBytes = ResolvePdfBytes(id, rawBytes, firstText);
-
-                if (finalBytes == null || !IsPdfHeader(finalBytes))
-                {
-                    _logger.LogError(
-                        "ID {Id}: could not resolve a valid PDF. CT={CT} Len={Len} FirstText={Text}",
-                        id, contentType, rawBytes.Length, firstText);
-
-                    // Dump the raw response so you can inspect it manually
-                    var dumpPath = Path.Combine(outputFolder, $"{id}_raw_response.txt");
-                    await File.WriteAllBytesAsync(dumpPath, rawBytes);
-                    _logger.LogWarning("Raw response saved to {Path} for manual inspection", dumpPath);
-
-                    failedIds.Add(id);
-                    continue;
-                }
-------------------------------------------------
-
-public class UnixToDateStringConverter : JsonConverter<string>
-{
-    public override string Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-    {
-        // Handle both number and string formats
-        if (reader.TokenType == JsonTokenType.Number)
-        {
-            var unixSeconds = reader.GetInt64();
-            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds)
-                                 .ToString("MM-dd-yyyy");
-        }
-        return reader.GetString() ?? "";
-    }
-
-    public override void Write(Utf8JsonWriter writer, string value, JsonSerializerOptions options)
-        => writer.WriteStringValue(value);
 }
 
-public class BounceRecord
-{
-    public string Status { get; set; }
-    public string Reason { get; set; }
-    public string Email { get; set; }
-    public string BounceType { get; set; }
 
-    [JsonConverter(typeof(UnixToDateStringConverter))]
-    public string CreatedDate { get; set; }  // now auto-converted on deserialization
+
+
+
+
+------------------
+
+
+
+
+using WeedKillerSendGridAPI.Models;
+using WeedKillerSendGridAPI.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace WeedKillerSendGridAPI;
+
+public class BounceProcessor
+{
+    private readonly IBounceApiService _apiService;
+    private readonly IDatabaseService _dbService;
+    private readonly IEmailNotificationService _emailService;
+    private readonly AppSettings _settings;
+    private readonly ILogger<BounceProcessor> _logger;
+
+    public BounceProcessor(
+        IBounceApiService apiService,
+        IDatabaseService dbService,
+        IEmailNotificationService emailService,
+        IOptions<AppSettings> settings,
+        ILogger<BounceProcessor> logger)
+    {
+        _apiService   = apiService;
+        _dbService    = dbService;
+        _emailService = emailService;
+        _settings     = settings.Value;
+        _logger       = logger;
+    }
+
+    public async Task RunAsync(CancellationToken ct = default)
+    {
+        await _dbService.EnsureTableExistsAsync(ct);
+
+        // Allow resuming from a known offset (e.g. after a failure)
+        int offset     = _settings.StartOffset;
+        int page       = 1;
+        int totalSaved = 0;
+
+        _logger.LogInformation(
+            "=== Starting paginated sync | StartOffset: {Offset} | Limit: {Limit} | {Start} → {End} ===",
+            offset, _settings.PageLimit, _settings.StartDate, _settings.EndDate);
+
+        while (true)
+        {
+            List<BounceRecord> records;
+
+            // ── 1. Fetch one page ────────────────────────────────────────────
+            try
+            {
+                _logger.LogInformation("[Page {Page}] Fetching offset={Offset}...", page, offset);
+                records = await _apiService.FetchPageAsync(offset, ct);
+                _logger.LogInformation("[Page {Page}] Received {Count} record(s).", page, records.Count);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Page {Page}] API fetch FAILED at offset={Offset}. Sending alert...", page, offset);
+                await _emailService.SendFailureAlertAsync(offset, _settings.StartDate, _settings.EndDate, ex);
+                throw;
+            }
+
+            // ── 2. Insert this page immediately ─────────────────────────────
+            if (records.Count > 0)
+            {
+                try
+                {
+                    var saved = await _dbService.SaveBounceRecordsAsync(records, ct);
+                    totalSaved += saved;
+                    _logger.LogInformation(
+                        "[Page {Page}] Inserted {Saved} record(s). Running total: {Total}.",
+                        page, saved, totalSaved);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "[Page {Page}] DB insert FAILED at offset={Offset}. Sending alert...", page, offset);
+                    await _emailService.SendFailureAlertAsync(offset, _settings.StartDate, _settings.EndDate, ex);
+                    throw;
+                }
+            }
+            else
+            {
+                _logger.LogWarning("[Page {Page}] No records returned at offset={Offset}.", page, offset);
+            }
+
+            // ── 3. Check if this was the last page ───────────────────────────
+            if (records.Count < _settings.PageLimit)
+            {
+                _logger.LogInformation(
+                    "[Page {Page}] Last page reached ({Count} < limit {Limit}). Stopping.",
+                    page, records.Count, _settings.PageLimit);
+                break;
+            }
+
+            // ── 4. Advance to the next page ──────────────────────────────────
+            offset += _settings.PageLimit;
+            page++;
+        }
+
+        _logger.LogInformation("=== Sync complete. Total records inserted: {Total} ===", totalSaved);
+    }
+}
+
+
+
+---------------------------------
+
+using System.Net;
+using System.Net.Mail;
+using WeedKillerSendGridAPI.Models;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace WeedKillerSendGridAPI.Services;
+
+public interface IEmailNotificationService
+{
+    Task SendFailureAlertAsync(int offset, string startDate, string endDate, Exception ex);
+}
+
+public class EmailNotificationService : IEmailNotificationService
+{
+    private readonly AppSettings _settings;
+    private readonly ILogger<EmailNotificationService> _logger;
+
+    public EmailNotificationService(IOptions<AppSettings> settings, ILogger<EmailNotificationService> logger)
+    {
+        _settings = settings.Value;
+        _logger = logger;
+    }
+
+    public async Task SendFailureAlertAsync(int offset, string startDate, string endDate, Exception ex)
+    {
+        try
+        {
+            var smtp = _settings.Smtp;
+
+            using var client = new SmtpClient(smtp.Host, smtp.Port)
+            {
+                EnableSsl = smtp.EnableSsl,
+                Credentials = new NetworkCredential(smtp.Username, smtp.Password)
+            };
+
+            var subject = $"[WeedKillerSendGridAPI] ❌ Failure at Offset {offset}";
+
+            var body = $"""
+                WeedKillerSendGridAPI encountered a failure during paginated fetch.
+
+                ── Checkpoint Details ──────────────────────────────
+                  Offset     : {offset}
+                  Start Date : {startDate}
+                  End Date   : {endDate}
+                ────────────────────────────────────────────────────
+
+                To resume, update appsettings.json:
+                  "StartOffset" : {offset}
+                  "StartDate"   : "{startDate}"
+                  "EndDate"     : "{endDate}"
+
+                ── Error Details ────────────────────────────────────
+                  Message    : {ex.Message}
+                  Type       : {ex.GetType().FullName}
+                  StackTrace :
+                {ex.StackTrace}
+                ────────────────────────────────────────────────────
+
+                Timestamp (UTC): {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}
+                """;
+
+            var mail = new MailMessage
+            {
+                From       = new MailAddress(smtp.From),
+                Subject    = subject,
+                Body       = body,
+                IsBodyHtml = false
+            };
+
+            foreach (var recipient in smtp.To)
+                mail.To.Add(recipient);
+
+            await client.SendMailAsync(mail);
+
+            _logger.LogInformation("Failure alert email sent to {Recipients}.", string.Join(", ", smtp.To));
+        }
+        catch (Exception emailEx)
+        {
+            // Never let email failure crash the app — just log it
+            _logger.LogError(emailEx, "Failed to send failure alert email.");
+        }
+    }
+}
+
+
+
+namespace WeedKillerSendGridAPI.Models;
+
+public class AppSettings
+{
+    public string ApiEndpoint       { get; set; } = string.Empty;
+    public string ApiKey            { get; set; } = string.Empty;
+    public string BearerToken       { get; set; } = string.Empty;
+    public string ConnectionString  { get; set; } = string.Empty;
+    public string TableName         { get; set; } = "BounceRecords";
+    public string DefaultBounceType { get; set; } = "SoftBounce";
+    public int    PageLimit         { get; set; } = 500;
+    public int    StartOffset       { get; set; } = 0;
+    public string StartDate         { get; set; } = string.Empty;
+    public string EndDate           { get; set; } = string.Empty;
+    public SmtpSettings Smtp        { get; set; } = new();
+}
+
+public class SmtpSettings
+{
+    public string       Host      { get; set; } = string.Empty;
+    public int          Port      { get; set; } = 587;
+    public bool         EnableSsl { get; set; } = true;
+    public string       Username  { get; set; } = string.Empty;
+    public string       Password  { get; set; } = string.Empty;
+    public string       From      { get; set; } = string.Empty;
+    public List<string> To        { get; set; } = [];
+}
+
+
+
+{
+  "AppSettings": {
+    "ApiEndpoint"      : "https://api.sendgrid.com/v3/suppression/bounces",
+    "ApiKey"           : "",
+    "BearerToken"      : "YOUR_SENDGRID_API_KEY_HERE",
+    "ConnectionString" : "Server=localhost;Database=YourDb;User Id=sa;Password=YourPassword;TrustServerCertificate=True;",
+    "TableName"        : "BounceRecords",
+    "DefaultBounceType": "SoftBounce",
+    "PageLimit"        : 500,
+    "StartOffset"      : 0,
+    "StartDate"        : "2026-05-09",
+    "EndDate"          : "2026-05-11",
+    "Smtp": {
+      "Host"     : "smtp.gmail.com",
+      "Port"     : 587,
+      "EnableSsl": true,
+      "Username" : "you@gmail.com",
+      "Password" : "YOUR_SMTP_PASSWORD",
+      "From"     : "you@gmail.com",
+      "To"       : [ "you@gmail.com", "oncall@yourcompany.com" ]
+    }
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default"  : "Information",
+      "Microsoft": "Warning"
+    }
+  }
+}
+
+
+
+
+using WeedKillerSendGridAPI.Models;
+using WeedKillerSendGridAPI.Services;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+var host = Host.CreateDefaultBuilder(args)
+    .ConfigureAppConfiguration((context, config) =>
+    {
+        config.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+        config.AddEnvironmentVariables();
+    })
+    .ConfigureServices((context, services) =>
+    {
+        services.Configure<AppSettings>(context.Configuration.GetSection("AppSettings"));
+        services.AddHttpClient<IBounceApiService, BounceApiService>();
+        services.AddSingleton<IDatabaseService, DatabaseService>();
+        services.AddSingleton<IEmailNotificationService, EmailNotificationService>();
+        services.AddTransient<BounceProcessor>();
+    })
+    .ConfigureLogging(logging =>
+    {
+        logging.ClearProviders();
+        logging.AddConsole();
+    })
+    .Build();
+
+var logger = host.Services.GetRequiredService<ILogger<Program>>();
+
+try
+{
+    logger.LogInformation("=== WeedKillerSendGridAPI Starting ===");
+
+    var processor = host.Services.GetRequiredService<BounceProcessor>();
+    await processor.RunAsync();
+
+    logger.LogInformation("=== WeedKillerSendGridAPI Completed Successfully ===");
+}
+catch (Exception ex)
+{
+    logger.LogCritical(ex, "Fatal error. Application shutting down.");
+    Environment.Exit(1);
 }

@@ -1,3 +1,73 @@
+
+
+public async Task<List<BounceRecord>> FetchBounceRecordsAsync(CancellationToken ct = default)
+    {
+        var allRecords = new List<BounceRecord>();
+        int offset = 0;
+        int page = 1;
+
+        _logger.LogInformation("Starting paginated fetch — limit: {Limit}, start_date: {Start}, end_date: {End}",
+            _settings.PageLimit, _settings.StartDate, _settings.EndDate);
+
+        while (true)
+        {
+            var url = BuildUrl(offset);
+            _logger.LogInformation("Page {Page} — GET {Url}", page, url);
+
+            var response = await _httpClient.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogDebug("Page {Page} raw response: {Json}", page, json);
+
+            var records = TryDeserializeAsArray(json) ?? [];
+
+            // Apply manual BounceType override for records missing it
+            foreach (var record in records.Where(r => string.IsNullOrWhiteSpace(r.BounceType)))
+            {
+                record.BounceType = _settings.DefaultBounceType;
+                _logger.LogDebug("BounceType missing for {Email} — defaulted to '{Default}'.",
+                    record.Email, _settings.DefaultBounceType);
+            }
+
+            allRecords.AddRange(records);
+
+            _logger.LogInformation("Page {Page} returned {Count} record(s). Total so far: {Total}.",
+                page, records.Count, allRecords.Count);
+
+            // Stop when the page returns fewer records than the limit — no more pages left
+            if (records.Count < _settings.PageLimit)
+            {
+                _logger.LogInformation("Last page reached (received {Count} < limit {Limit}). Stopping.",
+                    records.Count, _settings.PageLimit);
+                break;
+            }
+
+            offset += _settings.PageLimit;
+            page++;
+        }
+
+        _logger.LogInformation("Pagination complete. Total records fetched: {Total}.", allRecords.Count);
+        return allRecords;
+    }
+
+    private string BuildUrl(int offset)
+    {
+        var query = HttpUtility.ParseQueryString(string.Empty);
+
+        if (!string.IsNullOrWhiteSpace(_settings.StartDate))
+            query["start_date"] = _settings.StartDate;
+
+        if (!string.IsNullOrWhiteSpace(_settings.EndDate))
+            query["end_date"] = _settings.EndDate;
+
+        query["limit"]  = _settings.PageLimit.ToString();
+        query["offset"] = offset.ToString();
+
+        return $"?{query}";
+    }
+
+-------------------------------------------------------------
 private byte[]? ResolvePdfBytes(int id, byte[] rawBytes, string firstText)
     {
         // 1. Raw binary %PDF header (25 50 44 46)

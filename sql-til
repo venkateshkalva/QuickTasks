@@ -1,9 +1,130 @@
-CREATE TABLE [dbo].[BounceRecords] (
-    Id          INT IDENTITY PRIMARY KEY,
-    Status      NVARCHAR(100),
-    Reason      NVARCHAR(500),
-    Email       NVARCHAR(256),
-    BounceType  NVARCHAR(100),
-    CreatedDate NVARCHAR(50),
-    InsertedAt  DATETIME2 DEFAULT SYSUTCDATETIME()
-)
+using System.Data;
+using WeedKillerSendGridAPI.Models;
+using Dapper;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+
+namespace WeedKillerSendGridAPI.Services;
+
+public interface IDatabaseService
+{
+    Task EnsureTableExistsAsync(CancellationToken ct = default);
+    Task AlterReasonColumnIfNeededAsync(CancellationToken ct = default);
+    Task<int> SaveBounceRecordsAsync(IEnumerable<BounceRecord> records, CancellationToken ct = default);
+}
+
+public class DatabaseService : IDatabaseService
+{
+    private readonly AppSettings _settings;
+    private readonly ILogger<DatabaseService> _logger;
+
+    public DatabaseService(IOptions<AppSettings> settings, ILogger<DatabaseService> logger)
+    {
+        _settings = settings.Value;
+        _logger = logger;
+    }
+
+    private SqlConnection CreateConnection() => new(_settings.ConnectionString);
+
+    public async Task EnsureTableExistsAsync(CancellationToken ct = default)
+    {
+        var sql = $"""
+            IF NOT EXISTS (
+                SELECT 1 FROM sys.objects
+                WHERE object_id = OBJECT_ID(N'[dbo].[{_settings.TableName}]')
+                  AND type = N'U'
+            )
+            BEGIN
+                CREATE TABLE [dbo].[{_settings.TableName}] (
+                    [Id]          INT            IDENTITY(1,1) PRIMARY KEY,
+                    [Status]      NVARCHAR(100)  NOT NULL,
+                    [Reason]      NVARCHAR(MAX)  NOT NULL,
+                    [Email]       NVARCHAR(256)  NOT NULL,
+                    [BounceType]  NVARCHAR(100)  NOT NULL,
+                    [CreatedDate] NVARCHAR(50)   NOT NULL,
+                    [InsertedAt]  DATETIME2      NOT NULL DEFAULT SYSUTCDATETIME()
+                );
+
+                CREATE INDEX IX_{_settings.TableName}_Email
+                    ON [dbo].[{_settings.TableName}] ([Email]);
+            END
+            """;
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync(ct);
+        await conn.ExecuteAsync(sql);
+        _logger.LogInformation("Table [{Table}] is ready.", _settings.TableName);
+    }
+
+    public async Task AlterReasonColumnIfNeededAsync(CancellationToken ct = default)
+    {
+        var sql = $"""
+            IF EXISTS (
+                SELECT 1
+                FROM sys.columns c
+                JOIN sys.objects o ON c.object_id = o.object_id
+                WHERE o.name = '{_settings.TableName}'
+                  AND c.name = 'Reason'
+                  AND c.max_length <> -1
+            )
+            BEGIN
+                ALTER TABLE [dbo].[{_settings.TableName}]
+                    ALTER COLUMN [Reason] NVARCHAR(MAX) NOT NULL;
+            END
+            """;
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync(ct);
+        await conn.ExecuteAsync(sql);
+        _logger.LogInformation("Reason column verified/altered to NVARCHAR(MAX).");
+    }
+
+    /// <summary>
+    /// Inserts 500 records in a single SqlBulkCopy operation instead of 500 individual INSERTs.
+    /// Typically 10-50x faster than row-by-row inserts.
+    /// </summary>
+    public async Task<int> SaveBounceRecordsAsync(IEnumerable<BounceRecord> records, CancellationToken ct = default)
+    {
+        var recordList = records.ToList();
+        if (recordList.Count == 0) return 0;
+
+        // Build an in-memory DataTable matching the SQL table schema
+        var table = new DataTable();
+        table.Columns.Add("Status",      typeof(string));
+        table.Columns.Add("Reason",      typeof(string));
+        table.Columns.Add("Email",       typeof(string));
+        table.Columns.Add("BounceType",  typeof(string));
+        table.Columns.Add("CreatedDate", typeof(string));
+
+        foreach (var r in recordList)
+            table.Rows.Add(r.Status, r.Reason, r.Email, r.BounceType, r.CreatedDate);
+
+        await using var conn = CreateConnection();
+        await conn.OpenAsync(ct);
+
+        using var bulkCopy = new SqlBulkCopy(conn)
+        {
+            DestinationTableName = $"[dbo].[{_settings.TableName}]",
+            BatchSize            = _settings.BulkCopyBatchSize,
+            BulkCopyTimeout      = 120
+        };
+
+        // Explicitly map DataTable columns → SQL table columns (Id and InsertedAt are auto-generated)
+        bulkCopy.ColumnMappings.Add("Status",      "Status");
+        bulkCopy.ColumnMappings.Add("Reason",      "Reason");
+        bulkCopy.ColumnMappings.Add("Email",       "Email");
+        bulkCopy.ColumnMappings.Add("BounceType",  "BounceType");
+        bulkCopy.ColumnMappings.Add("CreatedDate", "CreatedDate");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await bulkCopy.WriteToServerAsync(table, ct);
+        sw.Stop();
+
+        _logger.LogInformation(
+            "BulkCopy inserted {Count} record(s) into [{Table}] in {Ms}ms.",
+            recordList.Count, _settings.TableName, sw.ElapsedMilliseconds);
+
+        return recordList.Count;
+    }
+}

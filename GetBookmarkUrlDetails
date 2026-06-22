@@ -1,0 +1,31 @@
+// Program.cs
+app.Use(async (context, next) =>
+{
+    await next();
+
+    // Catch 302 redirects to login/logout triggered by auth
+    if (context.Response.StatusCode == 302)
+    {
+        var location = context.Response.Headers["Location"].ToString();
+
+        if (location.Contains("/Account/Logout") || location.Contains("/Account/Login"))
+        {
+            var referer = context.Request.Headers["Referer"].ToString();
+            var isInternalReferer = !string.IsNullOrEmpty(referer)
+                && referer.StartsWith($"{context.Request.Scheme}://{context.Request.Host}");
+
+            string reason;
+
+            if (string.IsNullOrEmpty(referer))
+                reason = "bookmark"; // Fresh tab, no referer = bookmarked URL
+            else if (!isInternalReferer)
+                reason = "bookmark"; // External referer (e.g. email link, another site)
+            else
+                reason = "inactive"; // Had an internal referer = was on your site, session expired
+
+            // Append reason to the redirect location
+            var separator = location.Contains("?") ? "&" : "?";
+            context.Response.Headers["Location"] = $"{location}{separator}reason={reason}";
+        }
+    }
+});

@@ -27,5 +27,37 @@ app.Use(async (context, next) =>
             var separator = location.Contains("?") ? "&" : "?";
             context.Response.Headers["Location"] = $"{location}{separator}reason={reason}";
         }
+
     }
 });
+
+// Program.cs
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/Home/LogOut"; // your logout page path
+        options.Events = new CookieAuthenticationEvents
+        {
+            OnRedirectToLogin = ctx =>
+            {
+                var referer = ctx.Request.Headers["Referer"].ToString();
+                var host = $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+
+                string reason;
+                if (string.IsNullOrEmpty(referer))
+                    reason = "bookmark";        // no referer = fresh tab / bookmark
+                else if (!referer.StartsWith(host))
+                    reason = "bookmark";        // external referer
+                else
+                    reason = "inactive";        // was on your site, session expired
+
+                // Append reason to wherever auth was going to redirect
+                var redirectUri = ctx.RedirectUri;
+                var separator = redirectUri.Contains("?") ? "&" : "?";
+                ctx.Response.Redirect($"{redirectUri}{separator}reason={reason}");
+
+                return Task.CompletedTask;
+            }
+        };
+    });
+

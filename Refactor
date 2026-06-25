@@ -1,7 +1,7 @@
 public IActionResult OnPostEditCQ(int CQID)
 {
-    if (Set_ClaimantSearchCriteria is not Dictionary<String, String> searchCriteria)
-        return RedirectToPage(PagePaths.ErrorBasic);
+    var searchCriteria = Set_ClaimantSearchCriteria as Dictionary<String, String> 
+                         ?? new Dictionary<String, String>();
 
     searchCriteria["CQID"] = CQID.ToString();
     

@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -39,46 +38,51 @@ namespace QuestDetails.Pages
         {
             get
             {
-                if (HttpContext.Session.Get<Dictionary<string, string>>("Session_ClaimantSearchCriteria") != null)
                 return HttpContext.Session.Get<Dictionary<string, string>>(ClaimantSearchCriteriaSessionKey);
             }
             set
             {
                 if (value is null)
                 {
-                    return HttpContext.Session.Get<Dictionary<string, string>>("Session_ClaimantSearchCriteria");
                     HttpContext.Session.Remove(ClaimantSearchCriteriaSessionKey);
                     return;
                 }
 
-                return null;
-            }
-            set
-            {
-                HttpContext.Session.Set<Dictionary<string, string>>("Session_ClaimantSearchCriteria", value);
                 HttpContext.Session.Set(ClaimantSearchCriteriaSessionKey, value);
             }
         }
 
+        private int _claimantID;
+        public int ClaimantID
+        {
+            get
+            {
+                if (_claimantID > 0)
+                {
+                    return _claimantID;
+                }
+
+                var searchCriteria = Set_ClaimantSearchCriteria;
+                if (searchCriteria != null
+                    && searchCriteria.TryGetValue("LQClaimantID", out var raw)
+                    && int.TryParse(raw, out var parsed)
+                    && parsed > 0)
+                {
+                    _claimantID = parsed;
+                }
+
+                return _claimantID;
+            }
+            set => _claimantID = value;
+        }
+
+        private int _lqID;
+        public int LQID
+        {
+            get
             {
                 if (_lqID <= 0)
                 {
-                    string sessionKey = "Set_ClaimantSearchCriteria";
-                    var criteria = HttpContext.Session.Get<Dictionary<string, string>>(sessionKey);
-                    if (Set_ClaimantSearchCriteria != null)
-                    {
-                        Dictionary<string, string> searchCriteria = (Dictionary<string, string>)Set_ClaimantSearchCriteria;
-                        if (searchCriteria.ContainsKey("LQID"))
-                        {
-                            if ((!string.IsNullOrEmpty(searchCriteria["LQID"])
-                                && Convert.ToInt32(searchCriteria["LQID"]) > 0))
-                            {
-                                return Convert.ToInt32(searchCriteria["LQID"]);
-                            }
-                        }
-                    }
-
-                    return 0;
                     var criteria = Set_ClaimantSearchCriteria;
                     return criteria != null
                         && criteria.TryGetValue(LqIdCriteriaKey, out var rawLqId)
@@ -89,8 +93,412 @@ namespace QuestDetails.Pages
                 }
 
                 return (int)_lqID;
+            }
+            set
+            {
+                _lqID = value;
+            }
+        }
+
+        public LQDetailsInfoModel LQModelDetailDS
         {
             get
             {
-                if (HttpContext.Session.Get<LQDetailsInfoModel>("Session_LQModelDetailDS") == null)
                 return HttpContext.Session.Get<LQDetailsInfoModel>(DetailsSessionKey);
+            }
+            set
+            {
+                if (value is null)
+                {
+                    HttpContext.Session.Remove(DetailsSessionKey);
+                    return;
+                }
+
+                HttpContext.Session.Set(DetailsSessionKey, value);
+            }
+        }
+
+        public int DOBFlag
+        {
+            get
+            {
+                return HttpContext.Session.GetInt32(DobFlagSessionKey) ?? -1;
+            }
+            set
+            {
+                HttpContext.Session.SetInt32(DobFlagSessionKey, value);
+            }
+        }
+
+        public int ClaimantLQID
+        {
+            get
+            {
+                return HttpContext.Session.GetInt32(ClaimantLqIdSessionKey) ?? -1;
+            }
+            set
+            {
+                HttpContext.Session.SetInt32(ClaimantLqIdSessionKey, value);
+            }
+        }
+
+        [BindProperty]
+        public LQDetailsInfo LQDetailInfoObj { get; set; }
+
+        public bool AddDateTimeAndAddressButton { get; set; }
+        public bool AddDateTimeAndAddressPanel { get; set; }
+        public bool AddPersonIdentityButton { get; set; }
+        public bool AddPersonButton { get; set; }
+        public string CustomErrorMessage { get; set; }
+        public string PopUpMsg { get; set; }
+        public bool ShowConfirmPopUp { get; set; }
+        public bool ShowErrorPopUp { get; set; }
+        public bool IsCheckFlagOnPost { get; set; } = false;
+
+        public IReadOnlyList<RdList> WaterProviderYNs => WaterProviderOptions;
+        public IReadOnlyList<RdList> WaterPressureYNs => WaterPressureOptions;
+
+        public class RdList
+        {
+            public int ID { get; set; }
+            public string Text { get; set; }
+            public string Value { get; set; }
+
+            public RdList(int _ID, string _Text, string _Value)
+            {
+                ID = _ID;
+                Text = _Text;
+                Value = _Value;
+            }
+        }
+
+        #endregion
+
+        #region Handlers
+
+        public IActionResult OnGet()
+        {
+            if (!VerifySessionObj())
+            {
+                return RedirectToPage(PagePaths.ErrorUnAuthorized);
+            }
+
+            ClearDetailsSession();
+            HttpContext.Session.Remove(DobFlagSessionKey);
+            if (!TryPopulateLqClaimantDetails(out var details))
+            {
+                return RedirectToPage(PagePaths.ErrorBasic);
+            }
+
+            IsCheckFlagOnPost = true;
+            AddDateTimeAndAddressButton = true;
+            AddDateTimeAndAddressPanel = false;
+            LQDetailInfoObj = details._LQDetailsInfo?.FirstOrDefault() ?? new LQDetailsInfo();
+            ClaimantLQID = details._LQDetailsInfo?.FirstOrDefault(x => x.LQID > 0)?.LQID ?? -1;
+            DOBFlag = details._DOBFlag?.FirstOrDefault(x => x.Flag > 0)?.Flag ?? -1;
+            AddPersonButton = true;
+            AddPersonIdentityButton = true;
+            return Page();
+        }
+
+        public IActionResult OnPostSaveLQDetails()
+        {
+            if (!VerifySessionObj())
+            {
+                return RedirectToPage(PagePaths.ErrorUnAuthorized);
+            }
+
+            AddDateTimeAndAddressButton = true;
+            AddPersonButton = true;
+            if (IsNewFormValid())
+            {
+                var dsResult = ProcessAPIRequestWithParentXML("SaveLQGeneralQuestions", SaveLQDetailsParentXML());
+                if (TryGetSavedLqId(dsResult, out var savedLqId))
+                {
+                    ClearSessions();
+                    LQID = savedLqId;
+                    ClaimantLQID = savedLqId;
+                    PopUpMsg = "Liability Questionnaire Details were successfully saved.";
+                    ShowConfirmPopUp = true;
+                    if (!TryPopulateLqClaimantDetails(out _))
+                    {
+                        return RedirectToPage(PagePaths.ErrorBasic);
+                    }
+
+                    AddPersonIdentityButton = true;
+                    return Page();
+                }
+
+                return RedirectToPage(PagePaths.ErrorBasic);
+            }
+
+            return Page();
+        }
+
+        public IActionResult OnPostSaveAndComplete()
+        {
+            if (!VerifySessionObj())
+            {
+                return RedirectToPage(PagePaths.ErrorUnAuthorized);
+            }
+
+            if (IsSaveAndCompleteFormValid())
+            {
+                var dsResult = ProcessAPIRequestWithParentXML("SaveLQGeneralQuestions", SaveLQDetailsParentXML());
+                if (TryGetSavedLqId(dsResult, out var savedLqId))
+                {
+                    LQID = savedLqId;
+                    ClaimantLQID = savedLqId;
+                    UpdateSearchCriteria(savedLqId, ClaimantID);
+                    return RedirectToPage(PagePaths.LiabilityQuestionnaireDefendantSpecific, new { pid = ClaimantID, lqid = ClaimantLQID });
+                }
+
+                return RedirectToPage(PagePaths.ErrorBasic);
+            }
+
+            AddDateTimeAndAddressButton = true;
+            AddPersonButton = true;
+            AddPersonIdentityButton = true;
+            return Page();
+        }
+
+        public IActionResult OnPostBackToDetailsPage()
+        {
+            return RedirectToDetailsPage();
+        }
+
+        public IActionResult OnPostPrevious()
+        {
+            return RedirectToDetailsPage();
+        }
+
+        #endregion
+
+        #region Methods
+
+        private bool TryPopulateLqClaimantDetails(out LQDetailsInfoModel details)
+        {
+            var xmlString = new StringBuilder();
+            xmlString.Append("<NewDataSet><Table1>");
+            xmlString.Append(GenerateTag("ClaimantID", ClaimantID));
+            xmlString.Append(GenerateTag("LQID", LQID));
+            xmlString.Append("</Table1></NewDataSet>");
+
+            var ds = ProcessAPIRequestWithParentXML("GetLQDetails", xmlString.ToString());
+            if (ds != null && ds.Tables.Count > 0)
+            {
+                var data = JsonConvert.SerializeObject(ds);
+                details = JsonConvert.DeserializeObject<LQDetailsInfoModel>(data);
+                if (details != null)
+                {
+                    LQModelDetailDS = details;
+                    return true;
+                }
+            }
+
+            details = null;
+            return false;
+        }
+
+        public IList<YesNoRadioOption> YesNoOptions => GetYesNoRadioOptions();
+
+        private void RemovePlaintiffIDCriteria()
+        {
+            var criteria = Set_ClaimantSearchCriteria;
+            if (criteria is null)
+            {
+                return;
+            }
+
+            criteria.Remove(LqIdCriteriaKey);
+            criteria.Remove(ClaimantIdCriteriaKey);
+            Set_ClaimantSearchCriteria = criteria;
+        }
+
+        private void ClearSessions()
+        {
+            ModelState.Clear();
+            ClearDetailsSession();
+            HttpContext.Session.Remove(ClaimantLqIdSessionKey);
+        }
+
+        private void ClearDetailsSession()
+        {
+            HttpContext.Session.Remove(DetailsSessionKey);
+        }
+
+        private bool VerifySessionObj()
+        {
+            var criteria = Set_ClaimantSearchCriteria;
+            return criteria != null
+                && criteria.TryGetValue(ClaimantIdCriteriaKey, out var rawClaimantId)
+                && int.TryParse(rawClaimantId, out var claimantId)
+                && claimantId > 0;
+        }
+
+        private void UpdateSearchCriteria(int lqId, int claimantId)
+        {
+            var criteria = Set_ClaimantSearchCriteria ?? new Dictionary<string, string>();
+            criteria[LqIdCriteriaKey] = lqId.ToString();
+            criteria[ClaimantIdCriteriaKey] = claimantId.ToString();
+            Set_ClaimantSearchCriteria = criteria;
+        }
+
+        private IActionResult RedirectToDetailsPage()
+        {
+            RemovePlaintiffIDCriteria();
+            ClearSessions();
+            HttpContext.Session.Remove(DobFlagSessionKey);
+            return RedirectToPage(PagePaths.Details, new { pid = ClaimantID });
+        }
+
+        private static bool TryGetSavedLqId(DataSet dataSet, out int lqId)
+        {
+            lqId = 0;
+            return dataSet != null
+                && dataSet.Tables.Count > 1
+                && dataSet.Tables[1].Rows.Count > 0
+                && int.TryParse(dataSet.Tables[1].Rows[0]["LQID"]?.ToString(), out lqId)
+                && lqId > 0;
+        }
+
+        private bool IsNewFormValid()
+        {
+            CustomErrorMessage = string.Empty;
+            if (DOBFlag != 0 && DOBFlag != -1)
+            {
+                return true;
+            }
+
+            if (LQDetailInfoObj is null)
+            {
+                AddError("Unable to validate questionnaire details.");
+                return false;
+            }
+
+            var isValid = true;
+            if (!HasAnyQuestionAnswer(LQDetailInfoObj))
+            {
+                AddError("Please enter at least one field.");
+                isValid = false;
+            }
+
+            ValidateConditionalDescriptions(ref isValid);
+            return isValid;
+        }
+
+        private bool IsSaveAndCompleteFormValid()
+        {
+            return IsNewFormValid();
+        }
+
+        private static bool HasAnyQuestionAnswer(LQDetailsInfo details)
+        {
+            return !string.IsNullOrWhiteSpace(details.LQOtherDesc)
+                || details.ObservedFireYNID.HasValue
+                || details.ObservedJan31YNID.HasValue
+                || details.ObservedJan7YNID.HasValue
+                || details.OutageYNID.HasValue
+                || details.PoleBeforeFireYNID.HasValue
+                || details.PoleEyeWitnessYNID.HasValue
+                || details.WaterProviderYNID.HasValue
+                || details.WaterTurnYNID.HasValue
+                || details.WaterLoseYNID.HasValue;
+        }
+
+        private void AddError(string message)
+        {
+            CustomErrorMessage += $"<li>{message}</li>";
+        }
+
+        private void ValidateConditionalDescriptions(ref Boolean isValid)
+        {
+            if (LQDetailInfoObj.ObservedFireYNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.ObservedName))
+            {
+                AddError("Ignition and Spread of the Palisades Fire: 1-a. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.ObservedFireYNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.ObservedDesc))
+            {
+                AddError("Ignition and Spread of the Palisades Fire: 1-b. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.ObservedJan31YNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.ObservedJan31Desc))
+            {
+                AddError("Ignition and Spread of the Palisades Fire: 2-a. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.ObservedJan7YNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.ObservedJan7Desc))
+            {
+                AddError("Ignition and Spread of the Palisades Fire: 3-i. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.OutageYNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.OutageDesc))
+            {
+                AddError("Outages 1-a. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.PoleBeforeFireYNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.PoleBeforeFireDesc))
+            {
+                AddError("Equipment and Poles 1-a. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.PoleEyeWitnessYNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.PoleEyeWitnessDesc))
+            {
+                AddError("Equipment and Poles 2-a. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.PoleEyeWitnessYNID == 1 && LQDetailInfoObj.PoleWitnessYNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.PoleWitnessDesc))
+            {
+                AddError("Equipment and Poles 2-b-i. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.WaterProviderYNID == 4 && string.IsNullOrWhiteSpace(LQDetailInfoObj.WaterOtherDesc))
+            {
+                AddError("Water Use and Sources: 1. Description is required.");
+                isValid = false;
+            }
+            if (LQDetailInfoObj.WaterObserveYNID == 1 && string.IsNullOrWhiteSpace(LQDetailInfoObj.WaterObserveDesc))
+            {
+                AddError("Water Use and Sources: 4-a. Description is required.");
+                isValid = false;
+            }
+        }
+
+        private string SaveLQDetailsParentXML()
+        {
+            StringBuilder parentXmlString = new StringBuilder();
+            parentXmlString.Append("<NewDataSet><Table1>");
+            parentXmlString.Append(GenerateTag("LQID", ClaimantLQID));
+            parentXmlString.Append(GenerateTag("ClaimantID", ClaimantID));
+            parentXmlString.Append(GenerateTag("ObservedFireYNID", LQDetailInfoObj.ObservedFireYNID));
+            parentXmlString.Append(GenerateTag("ObservedName", LQDetailInfoObj.ObservedName));
+            parentXmlString.Append(GenerateTag("ObservedDesc", LQDetailInfoObj.ObservedDesc));
+            parentXmlString.Append(GenerateTag("ObservedJan31YNID", LQDetailInfoObj.ObservedJan31YNID));
+            parentXmlString.Append(GenerateTag("ObservedJan31Desc", LQDetailInfoObj.ObservedJan31Desc));
+            parentXmlString.Append(GenerateTag("ObservedJan7YNID", LQDetailInfoObj.ObservedJan7YNID));
+            parentXmlString.Append(GenerateTag("ObservedJan7Desc", LQDetailInfoObj.ObservedJan7Desc));
+            parentXmlString.Append(GenerateTag("OutageYNID", LQDetailInfoObj.OutageYNID));
+            parentXmlString.Append(GenerateTag("OutageDesc", LQDetailInfoObj.OutageDesc));
+            parentXmlString.Append(GenerateTag("PoleBeforeFireYNID", LQDetailInfoObj.PoleBeforeFireYNID));
+            parentXmlString.Append(GenerateTag("PoleBeforeFireDesc", LQDetailInfoObj.PoleBeforeFireDesc));
+            parentXmlString.Append(GenerateTag("PoleWitnessYNID", LQDetailInfoObj.PoleWitnessYNID));
+            parentXmlString.Append(GenerateTag("PoleWitnessDesc", LQDetailInfoObj.PoleWitnessDesc));
+            parentXmlString.Append(GenerateTag("PoleEyeWitnessYNID", LQDetailInfoObj.PoleEyeWitnessYNID));
+            parentXmlString.Append(GenerateTag("PoleEyeWitnessDesc", LQDetailInfoObj.PoleEyeWitnessDesc));
+            parentXmlString.Append(GenerateTag("WaterProviderYNID", LQDetailInfoObj.WaterProviderYNID));
+            parentXmlString.Append(GenerateTag("WaterOtherDesc", LQDetailInfoObj.WaterOtherDesc));
+            parentXmlString.Append(GenerateTag("WaterInfraDesc", LQDetailInfoObj.WaterInfraDesc));
+            parentXmlString.Append(GenerateTag("WaterTurnYNID", LQDetailInfoObj.WaterTurnYNID));
+            parentXmlString.Append(GenerateTag("WaterLoseYNID", LQDetailInfoObj.WaterLoseYNID));
+            parentXmlString.Append(GenerateTag("WaterRunYNID", LQDetailInfoObj.WaterRunYNID));
+            parentXmlString.Append(GenerateTag("WaterObserveYNID", LQDetailInfoObj.WaterObserveYNID));
+            parentXmlString.Append(GenerateTag("WaterObservedDesc", LQDetailInfoObj.WaterObserveDesc));
+            parentXmlString.Append(GenerateTag("LQOtherDesc", LQDetailInfoObj.LQOtherDesc));
+            parentXmlString.Append("</Table1></NewDataSet>");
+            return parentXmlString.ToString();
+        }
+
+        #endregion
+    }
+}

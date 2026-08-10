@@ -1,12 +1,96 @@
-public IActionResult OnPostEditCQ(int CQID)
-{
-    var searchCriteria = Set_ClaimantSearchCriteria as Dictionary<String, String> 
-                         ?? new Dictionary<String, String>();
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
+using System.Text;
 
-    searchCriteria["CQID"] = CQID.ToString();
-    
-    this.Set_ClaimantSearchCriteria = searchCriteria;
-    
-    return RedirectToPage(PagePaths.CQDetails, 
-        new { pid = ClaimantID, sdqid = CQID.ToString() });
-}
+namespace QuestDetails.Pages
+{
+    public class LQGeneralQuestionsModel : Common
+    {
+        private const string ClaimantSearchCriteriaSessionKey = "Session_ClaimantSearchCriteria";
+        private const string DetailsSessionKey = "Session_LQModelDetailDS";
+        private const string DobFlagSessionKey = "DOBFlag";
+        private const string ClaimantLqIdSessionKey = "ClaimantLQID";
+        private const string LqIdCriteriaKey = "LQID";
+        private const string ClaimantIdCriteriaKey = "LQClaimantID";
+
+        private static readonly IReadOnlyList<RdList> WaterProviderOptions = Array.AsReadOnly(new[]
+        {
+            new(1, "LADWP", "1"),
+            new(2, "District 29", "2"),
+            new(3, "Las Virgenes", "3"),
+            new(4, "Other", "4"),
+        });
+
+        private static readonly IReadOnlyList<RdList> WaterPressureOptions = Array.AsReadOnly(new[]
+        {
+            new(1, "Yes", "1"),
+            new(2, "No", "2"),
+            new(3, "Don't Know", "3"),
+        });
+
+        #region Properties
+
+        public Dictionary<string, string> Set_ClaimantSearchCriteria
+        {
+            get
+            {
+                if (HttpContext.Session.Get<Dictionary<string, string>>("Session_ClaimantSearchCriteria") != null)
+                return HttpContext.Session.Get<Dictionary<string, string>>(ClaimantSearchCriteriaSessionKey);
+            }
+            set
+            {
+                if (value is null)
+                {
+                    return HttpContext.Session.Get<Dictionary<string, string>>("Session_ClaimantSearchCriteria");
+                    HttpContext.Session.Remove(ClaimantSearchCriteriaSessionKey);
+                    return;
+                }
+
+                return null;
+            }
+            set
+            {
+                HttpContext.Session.Set<Dictionary<string, string>>("Session_ClaimantSearchCriteria", value);
+                HttpContext.Session.Set(ClaimantSearchCriteriaSessionKey, value);
+            }
+        }
+
+            {
+                if (_lqID <= 0)
+                {
+                    string sessionKey = "Set_ClaimantSearchCriteria";
+                    var criteria = HttpContext.Session.Get<Dictionary<string, string>>(sessionKey);
+                    if (Set_ClaimantSearchCriteria != null)
+                    {
+                        Dictionary<string, string> searchCriteria = (Dictionary<string, string>)Set_ClaimantSearchCriteria;
+                        if (searchCriteria.ContainsKey("LQID"))
+                        {
+                            if ((!string.IsNullOrEmpty(searchCriteria["LQID"])
+                                && Convert.ToInt32(searchCriteria["LQID"]) > 0))
+                            {
+                                return Convert.ToInt32(searchCriteria["LQID"]);
+                            }
+                        }
+                    }
+
+                    return 0;
+                    var criteria = Set_ClaimantSearchCriteria;
+                    return criteria != null
+                        && criteria.TryGetValue(LqIdCriteriaKey, out var rawLqId)
+                        && int.TryParse(rawLqId, out var parsedLqId)
+                        && parsedLqId > 0
+                        ? parsedLqId
+                        : 0;
+                }
+
+                return (int)_lqID;
+        {
+            get
+            {
+                if (HttpContext.Session.Get<LQDetailsInfoModel>("Session_LQModelDetailDS") == null)
+                return HttpContext.Session.Get<LQDetailsInfoModel>(DetailsSessionKey);

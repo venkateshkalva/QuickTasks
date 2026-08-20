@@ -1,0 +1,196 @@
+// =============================================
+// Local Storage - Selected Documents
+// =============================================
+
+function getSelectedDocuments(key) {
+    const storedArray = localStorage.getItem(key);
+
+    return storedArray
+        ? JSON.parse(storedArray)
+        : [];
+}
+
+
+// =============================================
+// Add document
+// =============================================
+
+function addNoaSfcIdToLocalStorageFunction(
+    key,
+    docId,
+    hhId,
+    docElementId,
+    hhElementId
+) {
+    let myArray = getSelectedDocuments(key);
+
+    docId = Number(docId);
+    hhId = Number(hhId);
+
+    // Prevent duplicate DocId
+    const alreadyExists = myArray.some(x => x.docId === docId);
+
+    if (!alreadyExists) {
+        myArray.push({
+            docId: docId,
+            hhId: hhId
+        });
+    }
+
+    // Save object array in localStorage
+    localStorage.setItem(
+        key,
+        JSON.stringify(myArray)
+    );
+
+    // Update hidden fields
+    updateSelectedDocumentHiddenFields(
+        myArray,
+        docElementId,
+        hhElementId
+    );
+}
+
+
+// =============================================
+// Remove document
+// =============================================
+
+function removeNoaSfcIdToLocalStorageFunction(
+    key,
+    docId,
+    docElementId,
+    hhElementId
+) {
+    let myArray = getSelectedDocuments(key);
+
+    docId = Number(docId);
+
+    // Remove ONLY the selected DocId.
+    // Its associated HHID is removed with the object.
+    myArray = myArray.filter(
+        x => x.docId !== docId
+    );
+
+    // Save updated array
+    localStorage.setItem(
+        key,
+        JSON.stringify(myArray)
+    );
+
+    // Rebuild both hidden fields
+    updateSelectedDocumentHiddenFields(
+        myArray,
+        docElementId,
+        hhElementId
+    );
+}
+
+
+// =============================================
+// Update hidden fields
+// =============================================
+
+function updateSelectedDocumentHiddenFields(
+    myArray,
+    docElementId,
+    hhElementId
+) {
+    const docIds = myArray.map(x => x.docId);
+
+    // DO NOT use Set here.
+    // We need HHIDs to remain aligned with DocIDs.
+    const hhIds = myArray.map(x => x.hhId);
+
+    $(docElementId).val(docIds.join(","));
+    $(hhElementId).val(hhIds.join(","));
+}
+
+
+// =============================================
+// Optional: restore hidden fields on page load
+// =============================================
+
+function restoreSelectedDocuments(
+    key,
+    docElementId,
+    hhElementId
+) {
+    const myArray = getSelectedDocuments(key);
+
+    updateSelectedDocumentHiddenFields(
+        myArray,
+        docElementId,
+        hhElementId
+    );
+}
+
+$(document).on("click", ".row-checkbox", function () {
+
+    const docId = $(this).data("docid");
+    const hhId = $(this).data("hhid");
+
+    const key = "selectedDocuments";
+
+    if ($(this).is(":checked")) {
+
+        addNoaSfcIdToLocalStorageFunction(
+            key,
+            docId,
+            hhId,
+            "#hdSelectedDocIDstr",
+            "#hdSelectedHHIDstr"
+        );
+
+    } else {
+
+        removeNoaSfcIdToLocalStorageFunction(
+            key,
+            docId,
+            "#hdSelectedDocIDstr",
+            "#hdSelectedHHIDstr"
+        );
+    }
+
+});
+
+<input type="hidden"
+       id="hdSelectedDocIDstr"
+       name="hdSelectedDocIDstr" />
+
+<input type="hidden"
+       id="hdSelectedHHIDstr"
+       name="hdSelectedHHIDstr" />
+
+public async Task<IActionResult> OnPostYourHandlerAsync(
+    string hdSelectedDocIDstr,
+    string hdSelectedHHIDstr)
+{
+    var docIds = string.IsNullOrWhiteSpace(hdSelectedDocIDstr)
+        ? new List<int>()
+        : hdSelectedDocIDstr
+            .Split(',')
+            .Select(int.Parse)
+            .ToList();
+
+    var hhIds = string.IsNullOrWhiteSpace(hdSelectedHHIDstr)
+        ? new List<int>()
+        : hdSelectedHHIDstr
+            .Split(',')
+            .Select(int.Parse)
+            .ToList();
+
+
+    for (int i = 0; i < docIds.Count; i++)
+    {
+        int docId = docIds[i];
+        int hhId = hhIds[i];
+
+        // Call your API here
+        // await SomeApiCall(docId, hhId);
+    }
+
+    return Page();
+}
+
+

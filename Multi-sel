@@ -193,4 +193,32 @@ public async Task<IActionResult> OnPostYourHandlerAsync(
     return Page();
 }
 
+function updateSelectedDocuments(myArray) {
+
+    const container = $("#selectedDocumentsContainer");
+
+    container.empty();
+
+    myArray.forEach((item, index) => {
+
+        container.append(`
+
+            <input type="hidden"
+
+                   name="SelectedDocuments[${index}].DocId"
+
+                   value="${item.docId}" />
+
+            <input type="hidden"
+
+                   name="SelectedDocuments[${index}].HHId"
+
+                   value="${item.hhId}" />
+
+        `);
+
+    });
+
+}
+
 

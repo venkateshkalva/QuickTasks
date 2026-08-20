@@ -1,315 +1,287 @@
-@page
-@model YourNamespace.Pages.DocumentManagementModel
-
-<form method="post">
-
-    <!-- Hidden inputs for ASP.NET Core model binding -->
-    <div id="selectedDocumentsContainer"></div>
-
-    <!-- Example table -->
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Select</th>
-                <th>Doc ID</th>
-                <th>HH ID</th>
-            </tr>
-        </thead>
-
-        <tbody>
-            <tr>
-                <td>
-                    <input type="checkbox"
-                           class="doc-checkbox"
-                           data-docid="1"
-                           data-hhid="999" />
-                </td>
-                <td>1</td>
-                <td>999</td>
-            </tr>
-
-            <tr>
-                <td>
-                    <input type="checkbox"
-                           class="doc-checkbox"
-                           data-docid="2"
-                           data-hhid="888" />
-                </td>
-                <td>2</td>
-                <td>888</td>
-            </tr>
-
-            <tr>
-                <td>
-                    <input type="checkbox"
-                           class="doc-checkbox"
-                           data-docid="3"
-                           data-hhid="999" />
-                </td>
-                <td>3</td>
-                <td>999</td>
-            </tr>
-
-            <tr>
-                <td>
-                    <input type="checkbox"
-                           class="doc-checkbox"
-                           data-docid="4"
-                           data-hhid="888" />
-                </td>
-                <td>4</td>
-                <td>888</td>
-            </tr>
-
-            <tr>
-                <td>
-                    <input type="checkbox"
-                           class="doc-checkbox"
-                           data-docid="5"
-                           data-hhid="777" />
-                </td>
-                <td>5</td>
-                <td>777</td>
-            </tr>
-        </tbody>
-    </table>
-
-    <button type="submit"
-            asp-page-handler="AddDoc"
-            class="btn btn-primary">
-        Submit
-    </button>
-
-</form>
+const selectedDocumentsKey = "selectedDocuments";
 
 
-@section Scripts {
+// ============================================================
+// SELECT / UNSELECT ALL
+// ============================================================
 
-<script>
+$(document).on("change", "#chkSelectAll", function () {
 
-    // ============================================================
-    // SETTINGS
-    // ============================================================
+    const isChecked = $(this).is(":checked");
 
-    const selectedDocumentsKey = "selectedDocuments";
+    let selectedDocuments = getSelectedDocuments();
 
+    $(".doc-checkbox").each(function () {
 
-    // ============================================================
-    // PAGE LOAD
-    // ============================================================
+        const checkbox = $(this);
 
-    $(document).ready(function () {
+        const docId = Number(checkbox.data("docid"));
+        const hhId = Number(checkbox.data("hhid"));
 
-        // Read selections from localStorage
-        const selectedDocuments =
-            getSelectedDocuments();
+        checkbox.prop("checked", isChecked);
 
-        // Rebuild hidden fields
-        updateSelectedDocumentInputs(
-            selectedDocuments
-        );
+        if (isChecked) {
 
-        // Restore checkbox state
-        restoreCheckboxes(
-            selectedDocuments
-        );
+            // Add only if it doesn't already exist
+            const alreadyExists =
+                selectedDocuments.some(
+                    x => x.docId === docId
+                );
+
+            if (!alreadyExists) {
+
+                selectedDocuments.push({
+                    docId: docId,
+                    hhId: hhId
+                });
+            }
+
+        } else {
+
+            // Remove this row
+            selectedDocuments =
+                selectedDocuments.filter(
+                    x => x.docId !== docId
+                );
+        }
     });
 
+    saveSelectedDocuments(selectedDocuments);
+});
 
-    // ============================================================
-    // CHECKBOX CLICK
-    // ============================================================
 
-    $(document).on(
-        "change",
-        ".doc-checkbox",
-        function () {
+// ============================================================
+// INDIVIDUAL CHECKBOX
+// ============================================================
 
-            const docId =
-                Number($(this).data("docid"));
+$(document).on("change", ".doc-checkbox", function () {
 
-            const hhId =
-                Number($(this).data("hhid"));
+    const docId = Number($(this).data("docid"));
+    const hhId = Number($(this).data("hhid"));
 
-            if ($(this).is(":checked")) {
+    if ($(this).is(":checked")) {
 
-                addSelectedDocument(
-                    docId,
-                    hhId
-                );
+        addSelectedDocument(
+            docId,
+            hhId
+        );
 
-            }
-            else {
+    } else {
 
-                removeSelectedDocument(
-                    docId
-                );
-            }
-        }
+        removeSelectedDocument(
+            docId
+        );
+    }
+
+    updateSelectAllCheckbox();
+});
+
+
+// ============================================================
+// UPDATE SELECT ALL STATE
+// ============================================================
+
+function updateSelectAllCheckbox() {
+
+    const total =
+        $(".doc-checkbox").length;
+
+    const checked =
+        $(".doc-checkbox:checked").length;
+
+    $("#chkSelectAll").prop(
+        "checked",
+        total > 0 && total === checked
     );
+}
 
 
-    // ============================================================
-    // GET SELECTED DOCUMENTS
-    // ============================================================
+// ============================================================
+// GET FROM LOCAL STORAGE
+// ============================================================
 
-    function getSelectedDocuments() {
+function getSelectedDocuments() {
 
-        const storedArray =
-            localStorage.getItem(
-                selectedDocumentsKey
-            );
+    const storedArray =
+        localStorage.getItem(
+            selectedDocumentsKey
+        );
 
-        if (!storedArray) {
+    if (!storedArray) {
+        return [];
+    }
+
+    try {
+
+        const data =
+            JSON.parse(storedArray);
+
+        if (!Array.isArray(data)) {
             return [];
         }
 
-        return JSON.parse(storedArray);
+        return data.filter(x =>
+            x &&
+            Number(x.docId) > 0 &&
+            Number(x.hhId) > 0
+        );
+
+    } catch {
+
+        localStorage.removeItem(
+            selectedDocumentsKey
+        );
+
+        return [];
+    }
+}
+
+
+// ============================================================
+// ADD ONE DOCUMENT
+// ============================================================
+
+function addSelectedDocument(
+    docId,
+    hhId
+) {
+
+    let selectedDocuments =
+        getSelectedDocuments();
+
+    const alreadyExists =
+        selectedDocuments.some(
+            x => x.docId === docId
+        );
+
+    if (!alreadyExists) {
+
+        selectedDocuments.push({
+            docId: docId,
+            hhId: hhId
+        });
     }
 
+    saveSelectedDocuments(
+        selectedDocuments
+    );
+}
 
-    // ============================================================
-    // ADD DOCUMENT
-    // ============================================================
 
-    function addSelectedDocument(
-        docId,
-        hhId
-    ) {
+// ============================================================
+// REMOVE ONE DOCUMENT
+// ============================================================
 
-        let selectedDocuments =
-            getSelectedDocuments();
+function removeSelectedDocument(
+    docId
+) {
 
-        // Check whether DocId already exists
-        const alreadyExists =
+    let selectedDocuments =
+        getSelectedDocuments();
+
+    selectedDocuments =
+        selectedDocuments.filter(
+            x => x.docId !== docId
+        );
+
+    saveSelectedDocuments(
+        selectedDocuments
+    );
+}
+
+
+// ============================================================
+// SAVE + UPDATE ASP.NET BINDING INPUTS
+// ============================================================
+
+function saveSelectedDocuments(
+    selectedDocuments
+) {
+
+    localStorage.setItem(
+        selectedDocumentsKey,
+        JSON.stringify(
+            selectedDocuments
+        )
+    );
+
+    updateSelectedDocumentInputs(
+        selectedDocuments
+    );
+}
+
+
+// ============================================================
+// GENERATE HIDDEN INPUTS
+// ============================================================
+
+function updateSelectedDocumentInputs(
+    selectedDocuments
+) {
+
+    const container =
+        $("#selectedDocumentsContainer");
+
+    container.empty();
+
+    selectedDocuments.forEach(
+        (item, index) => {
+
+            container.append(`
+                <input type="hidden"
+                       name="SelectedDocuments[${index}].DocId"
+                       value="${item.docId}" />
+
+                <input type="hidden"
+                       name="SelectedDocuments[${index}].HHId"
+                       value="${item.hhId}" />
+            `);
+        }
+    );
+}
+
+
+// ============================================================
+// RESTORE CHECKBOXES
+// ============================================================
+
+function restoreCheckboxes() {
+
+    const selectedDocuments =
+        getSelectedDocuments();
+
+    $(".doc-checkbox").each(function () {
+
+        const docId =
+            Number(
+                $(this).data("docid")
+            );
+
+        const isSelected =
             selectedDocuments.some(
                 x => x.docId === docId
             );
 
-        if (!alreadyExists) {
-
-            selectedDocuments.push({
-                docId: docId,
-                hhId: hhId
-            });
-        }
-
-        saveSelectedDocuments(
-            selectedDocuments
+        $(this).prop(
+            "checked",
+            isSelected
         );
-    }
+    });
 
-
-    // ============================================================
-    // REMOVE DOCUMENT
-    // ============================================================
-
-    function removeSelectedDocument(
-        docId
-    ) {
-
-        let selectedDocuments =
-            getSelectedDocuments();
-
-        // Remove only the selected document.
-        // HHId automatically stays if another
-        // document is using the same HHId.
-        selectedDocuments =
-            selectedDocuments.filter(
-                x => x.docId !== docId
-            );
-
-        saveSelectedDocuments(
-            selectedDocuments
-        );
-    }
-
-
-    // ============================================================
-    // SAVE TO LOCAL STORAGE
-    // ============================================================
-
-    function saveSelectedDocuments(
+    updateSelectedDocumentInputs(
         selectedDocuments
-    ) {
+    );
 
-        localStorage.setItem(
-            selectedDocumentsKey,
-            JSON.stringify(
-                selectedDocuments
-            )
-        );
-
-        // Rebuild Razor model-binding inputs
-        updateSelectedDocumentInputs(
-            selectedDocuments
-        );
-    }
-
-
-    // ============================================================
-    // CREATE HIDDEN INPUTS FOR ASP.NET MODEL BINDING
-    // ============================================================
-
-    function updateSelectedDocumentInputs(
-        selectedDocuments
-    ) {
-
-        const container =
-            $("#selectedDocumentsContainer");
-
-        // Remove existing hidden inputs
-        container.empty();
-
-
-        selectedDocuments.forEach(
-            (item, index) => {
-
-                container.append(`
-
-                    <input type="hidden"
-                           name="SelectedDocuments[${index}].DocId"
-                           value="${item.docId}" />
-
-                    <input type="hidden"
-                           name="SelectedDocuments[${index}].HHId"
-                           value="${item.hhId}" />
-
-                `);
-            }
-        );
-    }
-
-
-    // ============================================================
-    // RESTORE CHECKBOXES FROM LOCAL STORAGE
-    // ============================================================
-
-    function restoreCheckboxes(
-        selectedDocuments
-    ) {
-
-        $(".doc-checkbox").each(
-            function () {
-
-                const docId =
-                    Number(
-                        $(this).data("docid")
-                    );
-
-                const isSelected =
-                    selectedDocuments.some(
-                        x => x.docId === docId
-                    );
-
-                $(this).prop(
-                    "checked",
-                    isSelected
-                );
-            }
-        );
-    }
-
-</script>
-
+    updateSelectAllCheckbox();
 }
+
+
+// ============================================================
+// PAGE LOAD
+// ============================================================
+
+$(document).ready(function () {
+
+    restoreCheckboxes();
+
+});

@@ -1,224 +1,315 @@
-// =============================================
-// Local Storage - Selected Documents
-// =============================================
+@page
+@model YourNamespace.Pages.DocumentManagementModel
 
-function getSelectedDocuments(key) {
-    const storedArray = localStorage.getItem(key);
+<form method="post">
 
-    return storedArray
-        ? JSON.parse(storedArray)
-        : [];
-}
+    <!-- Hidden inputs for ASP.NET Core model binding -->
+    <div id="selectedDocumentsContainer"></div>
 
+    <!-- Example table -->
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>Doc ID</th>
+                <th>HH ID</th>
+            </tr>
+        </thead>
 
-// =============================================
-// Add document
-// =============================================
+        <tbody>
+            <tr>
+                <td>
+                    <input type="checkbox"
+                           class="doc-checkbox"
+                           data-docid="1"
+                           data-hhid="999" />
+                </td>
+                <td>1</td>
+                <td>999</td>
+            </tr>
 
-function addNoaSfcIdToLocalStorageFunction(
-    key,
-    docId,
-    hhId,
-    docElementId,
-    hhElementId
-) {
-    let myArray = getSelectedDocuments(key);
+            <tr>
+                <td>
+                    <input type="checkbox"
+                           class="doc-checkbox"
+                           data-docid="2"
+                           data-hhid="888" />
+                </td>
+                <td>2</td>
+                <td>888</td>
+            </tr>
 
-    docId = Number(docId);
-    hhId = Number(hhId);
+            <tr>
+                <td>
+                    <input type="checkbox"
+                           class="doc-checkbox"
+                           data-docid="3"
+                           data-hhid="999" />
+                </td>
+                <td>3</td>
+                <td>999</td>
+            </tr>
 
-    // Prevent duplicate DocId
-    const alreadyExists = myArray.some(x => x.docId === docId);
+            <tr>
+                <td>
+                    <input type="checkbox"
+                           class="doc-checkbox"
+                           data-docid="4"
+                           data-hhid="888" />
+                </td>
+                <td>4</td>
+                <td>888</td>
+            </tr>
 
-    if (!alreadyExists) {
-        myArray.push({
-            docId: docId,
-            hhId: hhId
-        });
-    }
+            <tr>
+                <td>
+                    <input type="checkbox"
+                           class="doc-checkbox"
+                           data-docid="5"
+                           data-hhid="777" />
+                </td>
+                <td>5</td>
+                <td>777</td>
+            </tr>
+        </tbody>
+    </table>
 
-    // Save object array in localStorage
-    localStorage.setItem(
-        key,
-        JSON.stringify(myArray)
-    );
+    <button type="submit"
+            asp-page-handler="AddDoc"
+            class="btn btn-primary">
+        Submit
+    </button>
 
-    // Update hidden fields
-    updateSelectedDocumentHiddenFields(
-        myArray,
-        docElementId,
-        hhElementId
-    );
-}
-
-
-// =============================================
-// Remove document
-// =============================================
-
-function removeNoaSfcIdToLocalStorageFunction(
-    key,
-    docId,
-    docElementId,
-    hhElementId
-) {
-    let myArray = getSelectedDocuments(key);
-
-    docId = Number(docId);
-
-    // Remove ONLY the selected DocId.
-    // Its associated HHID is removed with the object.
-    myArray = myArray.filter(
-        x => x.docId !== docId
-    );
-
-    // Save updated array
-    localStorage.setItem(
-        key,
-        JSON.stringify(myArray)
-    );
-
-    // Rebuild both hidden fields
-    updateSelectedDocumentHiddenFields(
-        myArray,
-        docElementId,
-        hhElementId
-    );
-}
+</form>
 
 
-// =============================================
-// Update hidden fields
-// =============================================
+@section Scripts {
 
-function updateSelectedDocumentHiddenFields(
-    myArray,
-    docElementId,
-    hhElementId
-) {
-    const docIds = myArray.map(x => x.docId);
+<script>
 
-    // DO NOT use Set here.
-    // We need HHIDs to remain aligned with DocIDs.
-    const hhIds = myArray.map(x => x.hhId);
+    // ============================================================
+    // SETTINGS
+    // ============================================================
 
-    $(docElementId).val(docIds.join(","));
-    $(hhElementId).val(hhIds.join(","));
-}
+    const selectedDocumentsKey = "selectedDocuments";
 
 
-// =============================================
-// Optional: restore hidden fields on page load
-// =============================================
+    // ============================================================
+    // PAGE LOAD
+    // ============================================================
 
-function restoreSelectedDocuments(
-    key,
-    docElementId,
-    hhElementId
-) {
-    const myArray = getSelectedDocuments(key);
+    $(document).ready(function () {
 
-    updateSelectedDocumentHiddenFields(
-        myArray,
-        docElementId,
-        hhElementId
-    );
-}
+        // Read selections from localStorage
+        const selectedDocuments =
+            getSelectedDocuments();
 
-$(document).on("click", ".row-checkbox", function () {
-
-    const docId = $(this).data("docid");
-    const hhId = $(this).data("hhid");
-
-    const key = "selectedDocuments";
-
-    if ($(this).is(":checked")) {
-
-        addNoaSfcIdToLocalStorageFunction(
-            key,
-            docId,
-            hhId,
-            "#hdSelectedDocIDstr",
-            "#hdSelectedHHIDstr"
+        // Rebuild hidden fields
+        updateSelectedDocumentInputs(
+            selectedDocuments
         );
 
-    } else {
-
-        removeNoaSfcIdToLocalStorageFunction(
-            key,
-            docId,
-            "#hdSelectedDocIDstr",
-            "#hdSelectedHHIDstr"
+        // Restore checkbox state
+        restoreCheckboxes(
+            selectedDocuments
         );
-    }
-
-});
-
-<input type="hidden"
-       id="hdSelectedDocIDstr"
-       name="hdSelectedDocIDstr" />
-
-<input type="hidden"
-       id="hdSelectedHHIDstr"
-       name="hdSelectedHHIDstr" />
-
-public async Task<IActionResult> OnPostYourHandlerAsync(
-    string hdSelectedDocIDstr,
-    string hdSelectedHHIDstr)
-{
-    var docIds = string.IsNullOrWhiteSpace(hdSelectedDocIDstr)
-        ? new List<int>()
-        : hdSelectedDocIDstr
-            .Split(',')
-            .Select(int.Parse)
-            .ToList();
-
-    var hhIds = string.IsNullOrWhiteSpace(hdSelectedHHIDstr)
-        ? new List<int>()
-        : hdSelectedHHIDstr
-            .Split(',')
-            .Select(int.Parse)
-            .ToList();
-
-
-    for (int i = 0; i < docIds.Count; i++)
-    {
-        int docId = docIds[i];
-        int hhId = hhIds[i];
-
-        // Call your API here
-        // await SomeApiCall(docId, hhId);
-    }
-
-    return Page();
-}
-
-function updateSelectedDocuments(myArray) {
-
-    const container = $("#selectedDocumentsContainer");
-
-    container.empty();
-
-    myArray.forEach((item, index) => {
-
-        container.append(`
-
-            <input type="hidden"
-
-                   name="SelectedDocuments[${index}].DocId"
-
-                   value="${item.docId}" />
-
-            <input type="hidden"
-
-                   name="SelectedDocuments[${index}].HHId"
-
-                   value="${item.hhId}" />
-
-        `);
-
     });
 
+
+    // ============================================================
+    // CHECKBOX CLICK
+    // ============================================================
+
+    $(document).on(
+        "change",
+        ".doc-checkbox",
+        function () {
+
+            const docId =
+                Number($(this).data("docid"));
+
+            const hhId =
+                Number($(this).data("hhid"));
+
+            if ($(this).is(":checked")) {
+
+                addSelectedDocument(
+                    docId,
+                    hhId
+                );
+
+            }
+            else {
+
+                removeSelectedDocument(
+                    docId
+                );
+            }
+        }
+    );
+
+
+    // ============================================================
+    // GET SELECTED DOCUMENTS
+    // ============================================================
+
+    function getSelectedDocuments() {
+
+        const storedArray =
+            localStorage.getItem(
+                selectedDocumentsKey
+            );
+
+        if (!storedArray) {
+            return [];
+        }
+
+        return JSON.parse(storedArray);
+    }
+
+
+    // ============================================================
+    // ADD DOCUMENT
+    // ============================================================
+
+    function addSelectedDocument(
+        docId,
+        hhId
+    ) {
+
+        let selectedDocuments =
+            getSelectedDocuments();
+
+        // Check whether DocId already exists
+        const alreadyExists =
+            selectedDocuments.some(
+                x => x.docId === docId
+            );
+
+        if (!alreadyExists) {
+
+            selectedDocuments.push({
+                docId: docId,
+                hhId: hhId
+            });
+        }
+
+        saveSelectedDocuments(
+            selectedDocuments
+        );
+    }
+
+
+    // ============================================================
+    // REMOVE DOCUMENT
+    // ============================================================
+
+    function removeSelectedDocument(
+        docId
+    ) {
+
+        let selectedDocuments =
+            getSelectedDocuments();
+
+        // Remove only the selected document.
+        // HHId automatically stays if another
+        // document is using the same HHId.
+        selectedDocuments =
+            selectedDocuments.filter(
+                x => x.docId !== docId
+            );
+
+        saveSelectedDocuments(
+            selectedDocuments
+        );
+    }
+
+
+    // ============================================================
+    // SAVE TO LOCAL STORAGE
+    // ============================================================
+
+    function saveSelectedDocuments(
+        selectedDocuments
+    ) {
+
+        localStorage.setItem(
+            selectedDocumentsKey,
+            JSON.stringify(
+                selectedDocuments
+            )
+        );
+
+        // Rebuild Razor model-binding inputs
+        updateSelectedDocumentInputs(
+            selectedDocuments
+        );
+    }
+
+
+    // ============================================================
+    // CREATE HIDDEN INPUTS FOR ASP.NET MODEL BINDING
+    // ============================================================
+
+    function updateSelectedDocumentInputs(
+        selectedDocuments
+    ) {
+
+        const container =
+            $("#selectedDocumentsContainer");
+
+        // Remove existing hidden inputs
+        container.empty();
+
+
+        selectedDocuments.forEach(
+            (item, index) => {
+
+                container.append(`
+
+                    <input type="hidden"
+                           name="SelectedDocuments[${index}].DocId"
+                           value="${item.docId}" />
+
+                    <input type="hidden"
+                           name="SelectedDocuments[${index}].HHId"
+                           value="${item.hhId}" />
+
+                `);
+            }
+        );
+    }
+
+
+    // ============================================================
+    // RESTORE CHECKBOXES FROM LOCAL STORAGE
+    // ============================================================
+
+    function restoreCheckboxes(
+        selectedDocuments
+    ) {
+
+        $(".doc-checkbox").each(
+            function () {
+
+                const docId =
+                    Number(
+                        $(this).data("docid")
+                    );
+
+                const isSelected =
+                    selectedDocuments.some(
+                        x => x.docId === docId
+                    );
+
+                $(this).prop(
+                    "checked",
+                    isSelected
+                );
+            }
+        );
+    }
+
+</script>
+
 }
-
-

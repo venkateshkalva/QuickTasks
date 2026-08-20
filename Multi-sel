@@ -1,3 +1,17 @@
+
+$('#yourTable').DataTable({
+    dom:
+        '<"row mb-2"' +
+            '<"col-md-4"l>' +
+            '<"col-md-4 text-center"i>' +
+            '<"col-md-4 text-end"f>' +
+        '>' +
+        'rt' +
+        '<"row mt-2"' +
+            '<"col-12 d-flex justify-content-center"p>' +
+        '>'
+});
+
 const selectedDocumentsKey = "selectedDocuments";
 
 

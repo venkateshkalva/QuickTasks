@@ -2,46 +2,97 @@ document.addEventListener("DOMContentLoaded", function () {
 
     const switchElement = document.getElementById("selectAllNoSwitch");
 
-    // ---------------------------------
-    // SWITCH MANUALLY CHANGED
-    // ---------------------------------
+    if (!switchElement) return;
+
+
+    // =====================================================
+    // Check whether ALL applicable radios are set to No (2)
+    // =====================================================
+    function areAllQuestionsNo() {
+
+        const radios = document.querySelectorAll(
+            'input[type="radio"]:not(.exclude-select-all)'
+        );
+
+        const groupNames = [
+            ...new Set(
+                [...radios]
+                    .map(radio => radio.name)
+                    .filter(Boolean)
+            )
+        ];
+
+        if (groupNames.length === 0) {
+            return false;
+        }
+
+        return groupNames.every(groupName => {
+
+            const checkedRadio = document.querySelector(
+                `input[type="radio"][name="${groupName}"]:checked:not(.exclude-select-all)`
+            );
+
+            return checkedRadio?.value === "2";
+        });
+    }
+
+
+    // =====================================================
+    // PAGE LOAD
+    // If everything is No -> switch ON
+    // =====================================================
+    switchElement.checked = areAllQuestionsNo();
+
+
+    // =====================================================
+    // SWITCH CHANGE
+    // =====================================================
     switchElement.addEventListener("change", function () {
 
         if (this.checked) {
 
             // Switch ON
-            // Set all applicable questions to No (value = 2)
+            // Set all questions to No (2)
             document.querySelectorAll(
                 'input[type="radio"][value="2"]:not(.exclude-select-all)'
             ).forEach(radio => {
+
                 radio.checked = true;
+
             });
 
         } else {
 
             // Switch OFF
-            // Clear all currently selected No answers
+            // Clear all No (2) selections
             document.querySelectorAll(
                 'input[type="radio"][value="2"]:checked:not(.exclude-select-all)'
             ).forEach(radio => {
+
                 radio.checked = false;
+
             });
+
         }
+
     });
 
 
-    // ---------------------------------
-    // RADIO MANUALLY CHANGED
-    // ---------------------------------
+    // =====================================================
+    // MANUAL RADIO CHANGE
+    // =====================================================
     document.querySelectorAll(
         'input[type="radio"]:not(.exclude-select-all)'
     ).forEach(radio => {
 
         radio.addEventListener("change", function () {
 
-            // User manually changed any question
-            // Turn the "All No" switch OFF
-            switchElement.checked = false;
+            // If user manually changes a radio:
+            //
+            // All No -> switch ON
+            // Anything else -> switch OFF
+
+            switchElement.checked = areAllQuestionsNo();
 
         });
 

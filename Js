@@ -4,9 +4,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
     if (!switchElement) return;
 
+    // Tells us that radio changes are coming from the switch
+    let changingFromSwitch = false;
+
 
     // =====================================================
-    // Check whether ALL applicable radios are set to No (2)
+    // CHECK IF ALL QUESTIONS ARE NO (value = 2)
     // =====================================================
     function areAllQuestionsNo() {
 
@@ -39,7 +42,6 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // =====================================================
     // PAGE LOAD
-    // If everything is No -> switch ON
     // =====================================================
     switchElement.checked = areAllQuestionsNo();
 
@@ -49,37 +51,53 @@ document.addEventListener("DOMContentLoaded", function () {
     // =====================================================
     switchElement.addEventListener("change", function () {
 
+        changingFromSwitch = true;
+
         if (this.checked) {
 
-            // Switch ON
-            // Set all questions to No (2)
+            // ---------------------------------------------
+            // SWITCH ON -> Set all to NO (value = 2)
+            // ---------------------------------------------
             document.querySelectorAll(
                 'input[type="radio"][value="2"]:not(.exclude-select-all)'
             ).forEach(radio => {
 
+                // Check the radio
                 radio.checked = true;
+
+                // IMPORTANT:
+                // Trigger change so your existing Razor/JS
+                // logic also gets updated
+                radio.dispatchEvent(
+                    new Event("change", { bubbles: true })
+                );
 
             });
 
         } else {
 
-            // Switch OFF
-            // Clear all No (2) selections
+            // ---------------------------------------------
+            // SWITCH OFF -> Clear selected NO answers
+            // ---------------------------------------------
             document.querySelectorAll(
                 'input[type="radio"][value="2"]:checked:not(.exclude-select-all)'
             ).forEach(radio => {
 
                 radio.checked = false;
 
-            });
+                radio.dispatchEvent(
+                    new Event("change", { bubbles: true })
+                );
 
+            });
         }
 
+        changingFromSwitch = false;
     });
 
 
     // =====================================================
-    // MANUAL RADIO CHANGE
+    // RADIO CHANGE
     // =====================================================
     document.querySelectorAll(
         'input[type="radio"]:not(.exclude-select-all)'
@@ -87,11 +105,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
         radio.addEventListener("change", function () {
 
-            // If user manually changes a radio:
-            //
-            // All No -> switch ON
-            // Anything else -> switch OFF
+            // Radio was changed by Select All switch.
+            // Don't modify the switch.
+            if (changingFromSwitch) {
+                return;
+            }
 
+            // Radio was manually changed by user.
+            // Recalculate switch state.
             switchElement.checked = areAllQuestionsNo();
 
         });

@@ -1,52 +1,50 @@
 document.addEventListener("DOMContentLoaded", function () {
+
     const switchElement = document.getElementById("selectAllNoSwitch");
 
-    // On page load:
-    // If every radio group is currently set to value="2",
-    // turn the switch ON.
-    const radioGroups = [
-        ...new Set(
-            [...document.querySelectorAll('input[type="radio"]')]
-                .map(radio => radio.name)
-                .filter(Boolean)
-        )
-    ];
-
-    const allAreNo = radioGroups.length > 0 &&
-        radioGroups.every(groupName => {
-            const checkedRadio =
-                document.querySelector(`input[type="radio"][name="${groupName}"]:checked`);
-
-            return checkedRadio && checkedRadio.value === "2";
-        });
-
-    switchElement.checked = allAreNo;
-
-
-    // When switch changes
+    // ---------------------------------
+    // SWITCH MANUALLY CHANGED
+    // ---------------------------------
     switchElement.addEventListener("change", function () {
 
         if (this.checked) {
-            // Switch ON -> select No (value 2)
-            document
-                .querySelectorAll('input[type="radio"][value="2"]')
-                .forEach(radio => {
-                    radio.checked = true;
-                    radio.dispatchEvent(
-                        new Event("change", { bubbles: true })
-                    );
-                });
+
+            // Switch ON
+            // Set all applicable questions to No (value = 2)
+            document.querySelectorAll(
+                'input[type="radio"][value="2"]:not(.exclude-select-all)'
+            ).forEach(radio => {
+                radio.checked = true;
+            });
 
         } else {
-            // Switch OFF -> clear ONLY radios currently set to No (value 2)
-            document
-                .querySelectorAll('input[type="radio"][value="2"]:checked')
-                .forEach(radio => {
-                    radio.checked = false;
-                    radio.dispatchEvent(
-                        new Event("change", { bubbles: true })
-                    );
-                });
+
+            // Switch OFF
+            // Clear all currently selected No answers
+            document.querySelectorAll(
+                'input[type="radio"][value="2"]:checked:not(.exclude-select-all)'
+            ).forEach(radio => {
+                radio.checked = false;
+            });
         }
     });
+
+
+    // ---------------------------------
+    // RADIO MANUALLY CHANGED
+    // ---------------------------------
+    document.querySelectorAll(
+        'input[type="radio"]:not(.exclude-select-all)'
+    ).forEach(radio => {
+
+        radio.addEventListener("change", function () {
+
+            // User manually changed any question
+            // Turn the "All No" switch OFF
+            switchElement.checked = false;
+
+        });
+
+    });
+
 });

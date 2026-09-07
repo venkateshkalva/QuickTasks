@@ -1,1 +1,3 @@
 Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624; StartTime='2025-07-16 20:40:00'; EndTime='2025-07-16 20:50:00'} | Format-List TimeCreated, Message
+
+Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624; StartTime='2025-07-16 00:00:00'; EndTime='2025-07-17 23:59:59'} | Where-Object {$_.Message -match "ftp-user"} | Format-List TimeCreated, Message

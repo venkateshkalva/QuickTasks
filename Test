@@ -1,0 +1,1 @@
+Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624; StartTime='2025-07-16 20:40:00'; EndTime='2025-07-16 20:50:00'} | Format-List TimeCreated, Message

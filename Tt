@@ -1,0 +1,126 @@
+document.addEventListener("DOMContentLoaded", function () {
+
+    const switchElement = document.getElementById("selectAllNoSwitch");
+
+    if (!switchElement) return;
+
+    let changingFromSwitch = false;
+
+
+    // =====================================================
+    // CHECK SWITCH STATE
+    // =====================================================
+    function updateSwitchState() {
+
+        // Get ONLY enabled, non-excluded radio buttons
+        const radios = [
+            ...document.querySelectorAll(
+                'input[type="radio"]:not(.exclude-select-all):not(:disabled)'
+            )
+        ];
+
+        // Get unique group names
+        const groupNames = [
+            ...new Set(
+                radios
+                    .map(radio => radio.name)
+                    .filter(Boolean)
+            )
+        ];
+
+        if (groupNames.length === 0) {
+            switchElement.checked = false;
+            return;
+        }
+
+
+        const allNo = groupNames.every(groupName => {
+
+            // Find checked radio from THIS group
+            const checkedRadio = radios.find(radio =>
+                radio.name === groupName &&
+                radio.checked
+            );
+
+            console.log(
+                "Group:",
+                groupName,
+                "Checked:",
+                checkedRadio?.value
+            );
+
+            return checkedRadio?.value === "2";
+        });
+
+
+        console.log("All No:", allNo);
+
+        switchElement.checked = allNo;
+    }
+
+
+    // =====================================================
+    // PAGE LOAD
+    // =====================================================
+    updateSwitchState();
+
+
+    // =====================================================
+    // SWITCH CHANGE
+    // =====================================================
+    switchElement.addEventListener("change", function () {
+
+        changingFromSwitch = true;
+
+        if (this.checked) {
+
+            // Set all ENABLED questions to NO
+            document.querySelectorAll(
+                'input[type="radio"][value="2"]:not(.exclude-select-all):not(:disabled)'
+            ).forEach(radio => {
+
+                radio.checked = true;
+
+                radio.dispatchEvent(
+                    new Event("change", { bubbles: true })
+                );
+            });
+
+        } else {
+
+            // Clear enabled NO selections
+            document.querySelectorAll(
+                'input[type="radio"][value="2"]:checked:not(.exclude-select-all):not(:disabled)'
+            ).forEach(radio => {
+
+                radio.checked = false;
+
+                radio.dispatchEvent(
+                    new Event("change", { bubbles: true })
+                );
+            });
+        }
+
+        changingFromSwitch = false;
+    });
+
+
+    // =====================================================
+    // MANUAL RADIO CHANGE
+    // =====================================================
+    document.querySelectorAll(
+        'input[type="radio"]:not(.exclude-select-all):not(:disabled)'
+    ).forEach(radio => {
+
+        radio.addEventListener("change", function () {
+
+            if (changingFromSwitch) {
+                return;
+            }
+
+            updateSwitchState();
+        });
+
+    });
+
+});

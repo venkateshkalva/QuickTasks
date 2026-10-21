@@ -1,5 +1,88 @@
-Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624; StartTime='2025-07-16 20:40:00'; EndTime='2025-07-16 20:50:00'} | Format-List TimeCreated, Message
 
-Get-WinEvent -FilterHashtable @{LogName='Security'; Id=4624; StartTime='2025-07-16 00:00:00'; EndTime='2025-07-17 23:59:59'} | Where-Object {$_.Message -match "ftp-user"} | Format-List TimeCreated, Message
-Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* | Select DisplayName, InstallDate | Sort InstallDate -Descending
-Get-MpComputerStatus | Select-Object FullScanAge, QuickScanAge
+public IActionResult OnPostSendEmail()
+{
+    int repid = TempData.Peek("repID") is int id ? id : 0;
+
+    int? currentClaimantid =
+        TempData.Peek("currentPlaintiffID") is int claimantId
+            ? claimantId
+            : null;
+
+    string currentPlaintiffType =
+        TempData.Peek("currentPlaintiffType") as string;
+
+    if (!string.IsNullOrWhiteSpace(ReleaseEmailObj?.EmailID))
+    {
+        string email = ReleaseEmailObj.EmailID.Trim();
+
+        bool emailExists;
+
+        if (repid > 0)
+        {
+            // Minor Individual, Business, or Trust
+            // Exclude current representative so resends are allowed.
+            // Only compare against OTHER representatives.
+            emailExists = PlaintiffPageModelDS.SignatureDetails.Any(x =>
+
+                x.ClaimantRepInfoID.HasValue &&
+                x.ClaimantRepInfoID.Value > 0 &&
+
+                x.ClaimantRepInfoID != repid &&
+
+                x.ClaimantType == currentPlaintiffType &&
+
+                string.Equals(
+                    x.EmailID?.Trim(),
+                    email,
+                    StringComparison.OrdinalIgnoreCase)
+            );
+        }
+        else
+        {
+            // Regular Individual
+            // RepID is null or 0.
+            // Exclude minors, which also have ClaimantType = Individual.
+            // Exclude current claimant to allow resending.
+            emailExists = PlaintiffPageModelDS.SignatureDetails.Any(x =>
+
+                (!x.ClaimantRepInfoID.HasValue ||
+                 x.ClaimantRepInfoID.Value == 0) &&
+
+                x.ClaimantID != currentClaimantid &&
+
+                x.ClaimantType == currentPlaintiffType &&
+
+                string.Equals(
+                    x.EmailID?.Trim(),
+                    email,
+                    StringComparison.OrdinalIgnoreCase)
+            );
+        }
+
+        if (emailExists)
+        {
+            ShowEmailInfoPopup = true;
+
+            CustomEmailPopupErrorMessage =
+                "You have already sent a verification email " +
+                "to this address for another recipient.";
+
+            return Page();
+        }
+    }
+
+    // KEEP YOUR EXISTING EMAIL SENDING LOGIC BELOW
+
+    if (ValidatInputs() && ModelState.IsValid)
+    {
+        if (ValidateEmailIDisRelated()
+            .Tables[1].Rows[0]["IsEmailValid"]
+            .ToString() == "1")
+        {
+            // Your existing StringBuilder, API call,
+            // and send-email functionality go here.
+        }
+    }
+
+    return Page();
+}

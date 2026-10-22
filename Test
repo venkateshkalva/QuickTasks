@@ -1,88 +1,82 @@
 
-public IActionResult OnPostSendEmail()
+int repid = TempData.Peek("repID") is int id ? id : 0;
+
+int? currentClaimantid =
+    TempData.Peek("currentPlaintiffID") is int claimantId
+        ? claimantId
+        : null;
+
+string currentPlaintiffType =
+    TempData.Peek("currentPlaintiffType") as string;
+
+if (!string.IsNullOrWhiteSpace(ReleaseEmailObj?.EmailID))
 {
-    int repid = TempData.Peek("repID") is int id ? id : 0;
+    string email = ReleaseEmailObj.EmailID.Trim();
 
-    int? currentClaimantid =
-        TempData.Peek("currentPlaintiffID") is int claimantId
-            ? claimantId
-            : null;
+    bool emailExists;
 
-    string currentPlaintiffType =
-        TempData.Peek("currentPlaintiffType") as string;
-
-    if (!string.IsNullOrWhiteSpace(ReleaseEmailObj?.EmailID))
+    if (repid > 0)
     {
-        string email = ReleaseEmailObj.EmailID.Trim();
+        // MINOR INDIVIDUAL / BUSINESS / TRUST
+        //
+        // Allow same email across different claimants.
+        // Block duplicate email for different representatives
+        // within the SAME claimant.
+        // Allow resend to the current representative.
 
-        bool emailExists;
+        emailExists = PlaintiffPageModelDS.SignatureDetails.Any(x =>
 
-        if (repid > 0)
-        {
-            // Minor Individual, Business, or Trust
-            // Exclude current representative so resends are allowed.
-            // Only compare against OTHER representatives.
-            emailExists = PlaintiffPageModelDS.SignatureDetails.Any(x =>
+            x.ClaimantID == currentClaimantid &&
 
-                x.ClaimantRepInfoID.HasValue &&
-                x.ClaimantRepInfoID.Value > 0 &&
+            x.ClaimantRepInfoID.HasValue &&
+            x.ClaimantRepInfoID.Value > 0 &&
 
-                x.ClaimantRepInfoID != repid &&
+            x.ClaimantRepInfoID.Value != repid &&
 
-                x.ClaimantType == currentPlaintiffType &&
+            !string.IsNullOrWhiteSpace(x.EmailSentDate) &&
 
-                string.Equals(
-                    x.EmailID?.Trim(),
-                    email,
-                    StringComparison.OrdinalIgnoreCase)
-            );
-        }
-        else
-        {
-            // Regular Individual
-            // RepID is null or 0.
-            // Exclude minors, which also have ClaimantType = Individual.
-            // Exclude current claimant to allow resending.
-            emailExists = PlaintiffPageModelDS.SignatureDetails.Any(x =>
+            string.Equals(
+                x.EmailID?.Trim(),
+                email,
+                StringComparison.OrdinalIgnoreCase)
+        );
+    }
+    else
+    {
+        // REGULAR INDIVIDUAL
+        //
+        // Only compare against other regular Individuals.
+        // Exclude Minor, Business, Trust representatives.
+        // Allow resend for the current claimant.
 
-                (!x.ClaimantRepInfoID.HasValue ||
-                 x.ClaimantRepInfoID.Value == 0) &&
+        emailExists = PlaintiffPageModelDS.SignatureDetails.Any(x =>
 
-                x.ClaimantID != currentClaimantid &&
+            (!x.ClaimantRepInfoID.HasValue ||
+             x.ClaimantRepInfoID.Value == 0) &&
 
-                x.ClaimantType == currentPlaintiffType &&
+            x.ClaimantID != currentClaimantid &&
 
-                string.Equals(
-                    x.EmailID?.Trim(),
-                    email,
-                    StringComparison.OrdinalIgnoreCase)
-            );
-        }
+            x.ClaimantType == currentPlaintiffType &&
 
-        if (emailExists)
-        {
-            ShowEmailInfoPopup = true;
+            !string.IsNullOrWhiteSpace(x.EmailSentDate) &&
 
-            CustomEmailPopupErrorMessage =
-                "You have already sent a verification email " +
-                "to this address for another recipient.";
-
-            return Page();
-        }
+            string.Equals(
+                x.EmailID?.Trim(),
+                email,
+                StringComparison.OrdinalIgnoreCase)
+        );
     }
 
-    // KEEP YOUR EXISTING EMAIL SENDING LOGIC BELOW
-
-    if (ValidatInputs() && ModelState.IsValid)
+    if (emailExists)
     {
-        if (ValidateEmailIDisRelated()
-            .Tables[1].Rows[0]["IsEmailValid"]
-            .ToString() == "1")
-        {
-            // Your existing StringBuilder, API call,
-            // and send-email functionality go here.
-        }
-    }
+        ShowEmailInfoPopup = true;
 
-    return Page();
+        CustomEmailPopupErrorMessage =
+            "A verification email has already been sent " +
+            "to this address for another recipient.";
+
+        return Page();
+    }
 }
+
+// Continue your existing email sending logic.
